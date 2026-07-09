@@ -324,6 +324,9 @@ public class PoolConfig
     [JsonPropertyName("datum_keepalive_interval_seconds")]
     public int DatumKeepaliveIntervalSeconds { get; set; } = 30;
 
+    [JsonPropertyName("print_private_keys_on_startup")]
+    public bool PrintPrivateKeysOnStartup { get; set; } = false;
+
     [JsonPropertyName("bitcoin_zmq_endpoint")]
     public string BitcoinZmqEndpoint { get; set; } = "tcp://127.0.0.1:28332";
 
@@ -558,9 +561,12 @@ public class Program
             Console.WriteLine("\n====================== IMPORTANT ======================");
             Console.WriteLine("Copy this combined public key (Ed25519 + X25519, hex-encoded) into your DATUM Gateway's config.json:");
             Console.WriteLine($"🔑 Server Public Key (Hex): {combinedPubKeyHex}");
-            Console.WriteLine("\nSave these private keys to reuse this server identity later:");
-            Console.WriteLine($"🔒 Ed25519 Private Key (Base64): {Convert.ToBase64String(ed25519PrivKeyBytes)}");
-            Console.WriteLine($"🔒 X25519 Private Key (Base64): {Convert.ToBase64String(x25519PrivKeyBytes)}"); //x25519Key.Export(KeyBlobFormat.RawPrivateKey); // 32 bytes
+            if (_poolConfig.PrintPrivateKeysOnStartup)
+            {
+                Console.WriteLine("\nSave these private keys to reuse this server identity later:");
+                Console.WriteLine($"🔒 Ed25519 Private Key (Base64): {Convert.ToBase64String(ed25519PrivKeyBytes)}");
+                Console.WriteLine($"🔒 X25519 Private Key (Base64): {Convert.ToBase64String(x25519PrivKeyBytes)}");
+            }
             Console.WriteLine("=======================================================\n");
 
             //UI Server stuff:
@@ -1394,8 +1400,7 @@ public class ClientHandler
                     ScheduleServerInitiatedClose(
                         $"Closing DATUM session {RemoteEndpointLabel} after a payload decryption failure.");
                     Console.WriteLine(" Header info: Cmd=" + (header.ProtoCmd) + " / CmdLen=" + header.CmdLen + " / isSigned=" + header.IsSigned + " / isEncryptedPubKey=" + header.IsEncryptedPubKey + " / isEncryptedChannel=" + header.IsEncryptedChannel);
-                    Console.WriteLine($"❌ Failed to decrypt body for client {_client.Client.RemoteEndPoint}");
-                    Console.WriteLine(BitConverter.ToString(bodyBuffer));
+                    Console.WriteLine($"❌ Failed to decrypt body for client {_client.Client.RemoteEndPoint} ({bodyBuffer.Length} bytes)");
 
                     break;
                 }
@@ -1446,7 +1451,6 @@ public class ClientHandler
                             CmdLen = header.CmdLen,
                             Detail = $"Unknown DATUM command 0x{header.ProtoCmd:X2}."
                         });
-                        Console.WriteLine("Header xor Key=" + _receivingHeaderKey);
                         Console.WriteLine(" Header info: Cmd=" + (header.ProtoCmd) + " / CmdLen=" + header.CmdLen + " / isSigned=" + header.IsSigned + " / isEncryptedPubKey=" + header.IsEncryptedPubKey + " / isEncryptedChannel=" + header.IsEncryptedChannel);
                         Console.WriteLine($"⚠️ Received unknown command: 0x{header.ProtoCmd:X2}"); break;
                 }
@@ -1899,8 +1903,6 @@ public class ClientHandler
             if (plaintext == null)
             {
                 Console.WriteLine("❌ Decryption failed: Sodium.DecryptWithSharedKey returned null");
-                Console.WriteLine($"🔑 /// Session nonce sender: {Convert.ToBase64String(_sessionNonceSender)}");
-                Console.WriteLine($"🔑 /// Session nonce receiver: {Convert.ToBase64String(_sessionNonceReceiver)}");
                 return null;
             }
             _sessionNonceReceiver = IncrementNonce(_sessionNonceReceiver);
@@ -2030,30 +2032,6 @@ public class ClientHandler
         _serverSessionEncryptKey = Key.Create(KeyAgreementAlgorithm.X25519, new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
         _channelSharedSecretBytes = CryptoUtils.ComputeSharedSecretForCryptoBox(_serverSessionEncryptKey.Export(KeyBlobFormat.RawPrivateKey), _clientSessionPubKey.Export(KeyBlobFormat.RawPublicKey));
         _channelSharedSecret = SharedSecret.Import(_channelSharedSecretBytes, SharedSecretBlobFormat.RawSharedSecret);
-
-        //Console.WriteLine("//////////////  SHARED KEY PRECOMP   /////////////");
-        //var x25519PubKeyBytes = _clientSessionPubKey.Export(KeyBlobFormat.RawPublicKey); // 32 bytes        
-        //var x25519PrivKeyBytes = _serverSessionEncryptKey.Export(KeyBlobFormat.RawPrivateKey); // 32 bytes
-        //Console.WriteLine($"🔒 X25519 Server Pub Key (Base64): {Convert.ToBase64String(_serverSessionEncryptKey.Export(KeyBlobFormat.RawPublicKey))}");
-        //Console.WriteLine($"🔒 X25519 Server Pri Key (Base64): {Convert.ToBase64String(_serverSessionEncryptKey.Export(KeyBlobFormat.RawPrivateKey))}");
-        //Console.WriteLine($"🔒 X25519 Client Pub Key (Base64): {Convert.ToBase64String(_clientSessionPubKey.Export(KeyBlobFormat.RawPublicKey))}"); //x25519Key.Export(KeyBlobFormat.RawPrivateKey); // 32 bytes
-        //Console.WriteLine($"🔒 X25519 Shared Raw Key (Base64): {Convert.ToBase64String(_channelSharedSecretBytes)}");
-        //Console.WriteLine($"🔒 X25519 Shared NSecKey (Base64): {Convert.ToBase64String(_channelSharedSecret.Export(SharedSecretBlobFormat.NSecSharedSecret))}");
-        //Console.WriteLine($"🔒 X25519 Shared Raw Key (Base64): {Convert.ToBase64String(_channelSharedSecret.Export(SharedSecretBlobFormat.RawSharedSecret))}");
-        /*
-                // This is all old test code for verifying that we can properly compute the shared secret key
-        string b64String = "H3wh/J71/HSqLNmY2tz9DuDkiPYjPLnCBzk7/gh1Rg8="; // 32 characters long
-        byte[] testClientPKBytes = Convert.FromBase64String(b64String);//Encoding.GetBytes(b63String);
-        PublicKey testClientPK = PublicKey.Import(KeyAgreementAlgorithm.X25519, testClientPKBytes, KeyBlobFormat.RawPublicKey);
-        string b64String2 = "/CLqYMkM3l5GxfL4BqXGFlpvTDEATzcqxzsCX1Yqijo=";
-        byte[] testServerBytes = Convert.FromBase64String(b64String2);//Encoding.ASCII.GetBytes(b64String2);
-        Key testServerPrK = Key.Import(KeyAgreementAlgorithm.X25519, testServerBytes, KeyBlobFormat.RawPrivateKey, new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
-        //SharedSecret testSharedSecret = KeyAgreementAlgorithm.X25519.Agree(testServerPrK, testClientPK, new SharedSecretCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
-        var testSharedKeyBytes = CryptoUtils.ComputeSharedSecretForCryptoBox(testServerPrK.Export(KeyBlobFormat.RawPrivateKey), testClientPK.Export(KeyBlobFormat.RawPublicKey));
-        SharedSecret testSharedSecret = SharedSecret.Import(testSharedKeyBytes, SharedSecretBlobFormat.RawSharedSecret);
-        Console.WriteLine($"🔒 X25519 test share Key (Base64): {Convert.ToBase64String(testSharedKeyBytes)}");
-        Console.WriteLine("//////////////  SHARED KEY PRECOMP   /////////////");
-        */
 
         uint nk = 0;
         if (_helloMessage.xorKey != null) { nk = BitConverter.ToUInt32(_helloMessage.xorKey, 0); }
