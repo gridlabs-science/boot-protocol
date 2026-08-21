@@ -82,7 +82,7 @@ public class BootProtocolStateService
     private const double SlowStateLockWaitWarningMs = 250;
     private const double SlowStateSaveWarningMs = 250;
     private const int MaxSeenShareIds = 20000;
-    private const int MaxAcceptedParentBlockHashes = 100000;
+    private const int MaxAcceptedParentBlockHashes = 128;
     private const int MaxRecentRejectedShareDiagnostics = 1000;
     private const int MaxRecentCoinbaserDiagnostics = 1000;
     private const int MaxRecentDatumShareResponses = 2000;
@@ -2036,18 +2036,16 @@ public class BootProtocolStateService
                         $"Fresh-parent retry validated but computed difficulty {freshParentValidation.Difficulty.ToString("F2", CultureInfo.InvariantCulture)} was below the floor.");
                     validation = freshParentValidation;
                 }
-                else if (TryLearnFreshParentFromTrustedShare(share.Source, freshParentValidation, currentStateSnapshot))
-                {
-                    validation = freshParentValidation;
-                    matchedSnapshotId = freshParentSnapshotValidation.SnapshotId;
-                }
                 else
                 {
                     RecordFreshParentRetryEvent(
-                        "fresh-parent-learn-failed",
+                        "fresh-parent-rejected",
                         share.Source,
                         freshParentValidation.PrevBlockHash,
-                        "Fresh-parent retry validated, but the parent could not be learned before the state changed.");
+                        "A mining share cannot establish a new Bitcoin parent; local Bitcoin notification authority must validate the tip first.");
+                    validation = RejectValidatedShare(
+                        freshParentValidation,
+                        "Fresh proof parent is outside the active Bitcoin tip; the attached Bitcoin source must validate it before direct ingress.");
                 }
             }
         }
@@ -2061,11 +2059,11 @@ public class BootProtocolStateService
                     "Previous-parent proof quarantined after the provisional peer-tip boundary.");
             }
             else if (validation.IsValid &&
-                     IsNewDirectIngressPreviousParentProofNoLock(validation.ShareId, validation.PrevBlockHash))
+                     IsNewDirectIngressOutsideActiveParentNoLock(validation.ShareId, validation.PrevBlockHash))
             {
                 validation = RejectValidatedShare(
                     validation,
-                    "New previous-parent proof rejected after the local snapshot boundary.");
+                    "Fresh proof parent is outside the active Bitcoin tip; retained proofs may be revalidated only through state reconciliation.");
             }
         }
         shareCoreValidationDurationMs = stageStopwatch.Elapsed.TotalMilliseconds;
@@ -2211,11 +2209,6 @@ public class BootProtocolStateService
                 OnDeckList = GetOnDeckList(),
                 NetworkStatus = networkStatus
             });
-        }
-
-        if (IsTrustedFreshParentSource(share.Source))
-        {
-            TryLearnFreshParentFromTrustedShare(share.Source, validation, currentStateSnapshot);
         }
 
         ShareRecordingResult result;
@@ -2943,12 +2936,6 @@ public class BootProtocolStateService
             variants.Add(ClonePayouts(context.WinnersList));
         }
 
-        if (context.FeeFreeWinnersList.Count > 0 &&
-            !variants.Any(existing => WinnersMatch(existing, context.FeeFreeWinnersList)))
-        {
-            variants.Add(ClonePayouts(context.FeeFreeWinnersList));
-        }
-
         return variants;
     }
 
@@ -3039,29 +3026,126 @@ public class BootProtocolStateService
     public async Task<ShareRecordingResult> SubmitShareAsync(RecordedShareSubmission share, string blockSource)
     {
         ShareRecordingResult result = await RecordShareAsync(share);
-        bool shouldRotate =
-            result.IsBlock &&
-            !string.IsNullOrWhiteSpace(result.BlockHash) &&
-            (result.Accepted || string.Equals(result.RejectionReason, "Duplicate share", StringComparison.Ordinal));
-
-        if (!shouldRotate)
+        result.BlockCandidate = result.IsBlock;
+        result.IsBlock = false;
+        if (!result.Accepted ||
+            !result.BlockCandidate ||
+            string.IsNullOrWhiteSpace(result.BlockHash))
         {
             return result;
         }
 
-        long? blockHeight = InferFoundBlockHeight(result.BlockHash);
-        RecordGridPoolBlockFound(result, blockSource, blockHeight);
-        string? provenSnapshotId = result.AcceptedProof?.PayoutSnapshotId ?? share.PayoutSnapshotId;
-        RoundRotationResult rotation = await RotateToNextRoundAsync(
+        RoundRotationResult? rotation = await TryConfirmGridPoolBlockCandidateAsync(
             result.BlockHash,
             blockSource,
-            manual: false,
-            blockHeight: blockHeight,
-            provenSnapshotId: provenSnapshotId);
+            blockHeight: null,
+            result.AcceptedProof,
+            activeChainObservation: false);
+        if (rotation == null)
+        {
+            RecordExternalNetworkEvent(
+                "gridpool-block-candidate",
+                blockSource,
+                "Accepted a declared-target block candidate; payout state remains unchanged pending local Bitcoin active-chain confirmation.",
+                result.BlockHash,
+                InferFoundBlockHeight(result.BlockHash));
+            return result;
+        }
+
+        result.IsBlock = rotation.Rotated;
         result.Rotation = rotation;
         result.NetworkStatus = rotation.NetworkStatus;
         result.OnDeckList = rotation.OnDeckList;
         return result;
+    }
+
+    private async Task<RoundRotationResult?> TryConfirmGridPoolBlockCandidateAsync(
+        string blockHash,
+        string source,
+        long? blockHeight,
+        BootShareProof? submittedProof = null,
+        bool activeChainObservation = false)
+    {
+        BootShareProof? provenBlockShare;
+        long? effectiveBlockHeight;
+        bool boundaryAlreadyApplied;
+        lock (_sync)
+        {
+            string normalizedBlockHash = NormalizeCanonicalBlockHash(blockHash) ?? string.Empty;
+            if (BitcoinNotificationModes.Resolve(_poolConfig) != BitcoinNotificationModes.AttachedNode ||
+                string.IsNullOrWhiteSpace(normalizedBlockHash) ||
+                !_localChainTipHeaders.TryGetValue(normalizedBlockHash, out BitcoinHeaderEvaluation? localHeader) ||
+                !localHeader.IsValid ||
+                BitcoinHashes.AreEquivalent(_state.LastGridPoolBlockHash, normalizedBlockHash))
+            {
+                return null;
+            }
+
+            provenBlockShare = submittedProof == null
+                ? _state.OnDeckProofs.FirstOrDefault(proof =>
+                    ProofMatchesBlockHash(proof, normalizedBlockHash))
+                : CloneProof(submittedProof);
+            if (provenBlockShare == null ||
+                !ProofMatchesBlockHash(provenBlockShare, normalizedBlockHash))
+            {
+                return null;
+            }
+
+            boundaryAlreadyApplied = BitcoinHashes.AreEquivalent(_state.CurrentTipBlockHash, normalizedBlockHash);
+            if (!activeChainObservation &&
+                (!boundaryAlreadyApplied ||
+                 !BitcoinHashes.AreEquivalent(_state.TrustedLocalTipBlockHash, normalizedBlockHash)))
+            {
+                return null;
+            }
+
+            effectiveBlockHeight = blockHeight ?? (boundaryAlreadyApplied
+                ? _state.CurrentTipBlockHeight
+                : _state.CurrentTipBlockHeight.HasValue ? _state.CurrentTipBlockHeight.Value + 1 : null);
+        }
+
+        RoundRotationResult rotation = await RotateToNextRoundAsync(
+            blockHash,
+            source,
+            manual: false,
+            blockHeight: effectiveBlockHeight,
+            provenSnapshotId: provenBlockShare.PayoutSnapshotId,
+            localBitcoinActiveChainConfirmed: true,
+            boundaryAlreadyApplied: boundaryAlreadyApplied,
+            confirmedParentBlockHash: provenBlockShare.PrevBlockHash);
+        if (!rotation.Rotated)
+        {
+            return rotation;
+        }
+
+        RecordGridPoolBlockFound(
+            new ShareRecordingResult
+            {
+                Accepted = true,
+                BlockCandidate = true,
+                IsBlock = true,
+                BlockHash = blockHash,
+                ComputedDifficulty = provenBlockShare.Difficulty,
+                AcceptedProof = CloneProof(provenBlockShare)
+            },
+            source,
+            effectiveBlockHeight);
+        rotation.NetworkStatus = GetNetworkStatus();
+        return rotation;
+    }
+
+    private static bool ProofMatchesBlockHash(BootShareProof proof, string blockHash)
+    {
+        try
+        {
+            return BitcoinHashes.AreEquivalent(
+                BitcoinHashes.ComputeBlockHashFromHeader(proof.HeaderHex),
+                blockHash);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            return false;
+        }
     }
 
     public LocalMiningTelemetryResultDto RecordLocalMiningTelemetryBatch(
@@ -3205,7 +3289,10 @@ public class BootProtocolStateService
         string source,
         bool manual,
         long? blockHeight = null,
-        string? provenSnapshotId = null)
+        string? provenSnapshotId = null,
+        bool localBitcoinActiveChainConfirmed = false,
+        bool boundaryAlreadyApplied = false,
+        string? confirmedParentBlockHash = null)
     {
         RoundRotationResult result;
         bool winnersChanged = false;
@@ -3220,6 +3307,19 @@ public class BootProtocolStateService
             long? effectiveBlockHeight = manual
                 ? blockHeight ?? previousTipBlockHeight
                 : blockHeight;
+
+            if (!manual && !localBitcoinActiveChainConfirmed)
+            {
+                return new RoundRotationResult
+                {
+                    Rotated = false,
+                    Reason = "GridPool block is not confirmed by the local Bitcoin active chain",
+                    BlockHash = previousTipBlockHash,
+                    WinnersList = ClonePayouts(_state.WinnersList),
+                    OnDeckList = ClonePayouts(_state.OnDeckList),
+                    NetworkStatus = BuildNetworkStatusNoLock()
+                };
+            }
 
             if (!manual &&
                 IsStaleTipObservationNoLock(effectiveBlockHash, effectiveBlockHeight, previousTipBlockHash, previousTipBlockHeight))
@@ -3243,7 +3343,7 @@ public class BootProtocolStateService
                 };
             }
 
-            if (!manual &&
+            if (!manual && !boundaryAlreadyApplied &&
                 !string.IsNullOrWhiteSpace(effectiveBlockHash) &&
                 BitcoinHashes.AreEquivalent(effectiveBlockHash, previousTipBlockHash) &&
                 BitcoinHashes.AreEquivalent(effectiveBlockHash, _state.TrustedLocalTipBlockHash))
@@ -3302,8 +3402,14 @@ public class BootProtocolStateService
                 ApplyPaidSnapshotRemovalNoLock(source, effectiveBlockHash, effectiveBlockHeight, nowUtc, paidSnapshotId);
                 _state.CurrentTipBlockHash = effectiveBlockHash;
                 _state.CurrentTipBlockHeight = effectiveBlockHeight;
-                PreserveAcceptedParentContinuityAfterRotationNoLock(previousTipBlockHash, effectiveBlockHash);
-                ApplySnapshotFromWorkSetNoLock(effectiveBlockHash, effectiveBlockHeight, source, nowUtc, advanceRound: true);
+                string? paidParentBlockHash = NormalizeCanonicalBlockHash(confirmedParentBlockHash) ?? previousTipBlockHash;
+                PreserveAcceptedParentContinuityAfterRotationNoLock(paidParentBlockHash, effectiveBlockHash);
+                ApplySnapshotFromWorkSetNoLock(
+                    effectiveBlockHash,
+                    effectiveBlockHeight,
+                    source,
+                    nowUtc,
+                    advanceRound: !boundaryAlreadyApplied);
 
                 BootStateBundle lockedBundle = BuildBundleFromCurrentCandidateNoLock();
                 lockedBundle.StateId = _state.CurrentStateId;
@@ -3312,8 +3418,10 @@ public class BootProtocolStateService
                 lockedBundle.CurrentRoundNumber = _state.CurrentRoundNumber;
                 lockedBundle.LockedByBlockHash = effectiveBlockHash;
                 lockedBundle.LockedByBlockHeight = effectiveBlockHeight;
-                lockedBundle.ParentBlockHash = previousTipBlockHash;
-                lockedBundle.ParentBlockHeight = previousTipBlockHeight;
+                lockedBundle.ParentBlockHash = paidParentBlockHash;
+                lockedBundle.ParentBlockHeight = boundaryAlreadyApplied && effectiveBlockHeight.HasValue
+                    ? effectiveBlockHeight.Value - 1
+                    : previousTipBlockHeight;
                 lockedBundle.CreatedAtUtc = nowUtc;
                 lockedBundle.ValidParentBlockHashes = GetAcceptedParentBlockHashesNoLock();
                 lockedBundle.ProofWinnersList = paidWinners;
@@ -3496,6 +3604,16 @@ public class BootProtocolStateService
 
     public async Task<BootNetworkStatusDto> ObserveChainTipAsync(string blockHash, string source, long? blockHeight = null)
     {
+        RoundRotationResult? confirmedGridPoolBlock = await TryConfirmGridPoolBlockCandidateAsync(
+            blockHash,
+            $"local-bitcoin-confirmed:{source}",
+            blockHeight,
+            activeChainObservation: IsLocalBitcoinActiveChainSource(source));
+        if (confirmedGridPoolBlock?.Rotated == true)
+        {
+            return confirmedGridPoolBlock.NetworkStatus;
+        }
+
         BootNetworkStatusDto status;
         string? normalizedBlockHash;
         long? effectiveBlockHeight;
@@ -3563,7 +3681,8 @@ public class BootProtocolStateService
                 }
             }
 
-            if (IsStaleTipObservationNoLock(
+            bool trustedReorganization = source.Contains("reorg", StringComparison.OrdinalIgnoreCase);
+            if (!trustedReorganization && IsStaleTipObservationNoLock(
                 normalizedBlockHash,
                 effectiveBlockHeight,
                 _state.CurrentTipBlockHash,
@@ -3582,7 +3701,7 @@ public class BootProtocolStateService
 
             bool oneBlockReorg = GetActiveConsensusVersionNoLock() >= BootProtocolVersions.ConsensusVersion &&
                 effectiveBlockHeight.HasValue &&
-                _state.CurrentTipBlockHeight == effectiveBlockHeight &&
+                (_state.CurrentTipBlockHeight == effectiveBlockHeight || trustedReorganization) &&
                 !BitcoinHashes.AreEquivalent(normalizedBlockHash, _state.CurrentTipBlockHash);
             if (oneBlockReorg)
             {
@@ -3692,6 +3811,13 @@ public class BootProtocolStateService
         }
 
         return status;
+    }
+
+    private static bool IsLocalBitcoinActiveChainSource(string source)
+    {
+        return source.Equals("zmq", StringComparison.OrdinalIgnoreCase) ||
+               source.StartsWith("zmq-", StringComparison.OrdinalIgnoreCase) ||
+               source.StartsWith("rpc", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<BootNetworkStatusDto> ObservePeerChainTipAsync(
@@ -4126,78 +4252,79 @@ public class BootProtocolStateService
             return false;
         }
 
-        bool prooflessCurrentSnapshot = bundle.ShareProofs.Count == 0 && bundle.WinnersList.Count > 0;
+        if (bundle.ShareProofs.Count == 0 && bundle.WinnersList.Count > 0)
+        {
+            _logger.LogWarning(
+                "Rejected proofless locked state bundle {StateId} from {SourceEndpoint}.",
+                bundle.StateId,
+                sourceEndpoint);
+            RecordExternalNetworkEvent(
+                "state-proofless-rejected",
+                sourceEndpoint,
+                "Rejected remote payout state because it did not include the proofs required to reconstruct its Winners List.",
+                lockedTipSnapshot,
+                lockedTipHeightSnapshot);
+            return false;
+        }
+
         List<BootShareProof> validatedProofs;
         List<BootShareProof> validatedWorkSetProofs = [];
         List<PayoutInfo> expectedPayouts;
         string expectedStateId;
         string legacyExpectedStateId;
         double remoteLockedTotalDifficulty;
-        if (prooflessCurrentSnapshot)
+        try
         {
-            if (string.IsNullOrWhiteSpace(bundle.StateId))
+            IReadOnlyList<PayoutInfo> proofWinners = bundle.ProofWinnersList.Count > 0
+                ? bundle.ProofWinnersList
+                : currentWinnersSnapshot;
+            List<string> lockedStateParentBlockHashes = NormalizeAcceptedParentBlockHashes(
+                bundle.ValidParentBlockHashes
+                    .Append(bundle.ParentBlockHash ?? string.Empty)
+                    .Concat(bundle.ShareProofs.Select(proof => proof.PrevBlockHash)));
+            validatedProofs = ValidateImportedProofs(
+                bundle.ShareProofs,
+                proofWinners,
+                lockedStateParentBlockHashes,
+                $"peer-locked:{sourceEndpoint}",
+                bundle.SnapshotContexts);
+            if (bundle.WorkSetProofs.Count > 0)
             {
-                return false;
-            }
-
-            validatedProofs = [];
-            expectedPayouts = ClonePayouts(bundle.WinnersList);
-            expectedStateId = bundle.StateId;
-            legacyExpectedStateId = bundle.StateId;
-            remoteLockedTotalDifficulty = expectedPayouts.Sum(x => x.Difficulty);
-        }
-        else
-        {
-            try
-            {
-                IReadOnlyList<PayoutInfo> proofWinners = bundle.ProofWinnersList.Count > 0
-                    ? bundle.ProofWinnersList
-                    : currentWinnersSnapshot;
-                List<string> lockedStateParentBlockHashes = NormalizeAcceptedParentBlockHashes(
-                    bundle.ValidParentBlockHashes
-                        .Append(bundle.ParentBlockHash ?? string.Empty)
-                        .Concat(bundle.ShareProofs.Select(proof => proof.PrevBlockHash)));
-                validatedProofs = ValidateImportedProofs(
-                    bundle.ShareProofs,
+                validatedWorkSetProofs = ValidateImportedProofs(
+                    bundle.WorkSetProofs,
                     proofWinners,
                     lockedStateParentBlockHashes,
-                    $"peer-locked:{sourceEndpoint}",
+                    $"peer-workset:{sourceEndpoint}",
                     bundle.SnapshotContexts);
-                if (bundle.WorkSetProofs.Count > 0)
-                {
-                    validatedWorkSetProofs = ValidateImportedProofs(
-                        bundle.WorkSetProofs,
-                        proofWinners,
-                        lockedStateParentBlockHashes,
-                        $"peer-workset:{sourceEndpoint}",
-                        bundle.SnapshotContexts);
-                }
-                expectedPayouts = BuildPayoutsFromProofs(validatedProofs);
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Rejected locked state bundle from {SourceEndpoint}.", sourceEndpoint);
-                return false;
-            }
-
-            expectedStateId = ComputeStateIdNoLock(validatedProofs, lockedTipSnapshot);
-            legacyExpectedStateId = ComputeStateIdNoLock(validatedProofs, null);
-            bool stateIdMatches =
-                string.Equals(expectedStateId, bundle.StateId, StringComparison.OrdinalIgnoreCase) ||
-                (string.IsNullOrWhiteSpace(bundle.LockedByBlockHash) &&
-                 string.Equals(legacyExpectedStateId, bundle.StateId, StringComparison.OrdinalIgnoreCase));
-            if (!stateIdMatches)
-            {
-                return false;
-            }
-
-            if (!WinnersMatch(expectedPayouts, bundle.WinnersList))
-            {
-                return false;
-            }
-
-            remoteLockedTotalDifficulty = validatedProofs.Sum(x => x.Difficulty);
+            expectedPayouts = BuildPayoutsFromProofs(validatedProofs);
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Rejected locked state bundle from {SourceEndpoint}.", sourceEndpoint);
+            return false;
+        }
+
+        expectedStateId = ComputeStateIdNoLock(validatedProofs, lockedTipSnapshot);
+        legacyExpectedStateId = ComputeStateIdNoLock(validatedProofs, null);
+        bool stateIdMatches =
+            string.Equals(expectedStateId, bundle.StateId, StringComparison.OrdinalIgnoreCase) ||
+            (string.IsNullOrWhiteSpace(bundle.LockedByBlockHash) &&
+             string.Equals(legacyExpectedStateId, bundle.StateId, StringComparison.OrdinalIgnoreCase));
+        if (!stateIdMatches || !WinnersMatch(expectedPayouts, bundle.WinnersList))
+        {
+            return false;
+        }
+
+        if (bundle.ActiveSnapshotProofIds.Count > 0 &&
+            !bundle.ActiveSnapshotProofIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).SequenceEqual(
+                validatedProofs.Select(proof => proof.ShareId).OrderBy(id => id, StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        remoteLockedTotalDifficulty = validatedProofs.Sum(x => x.Difficulty);
 
         bool hasLocalActiveFamily;
         lock (_sync)
@@ -4235,25 +4362,47 @@ public class BootProtocolStateService
                 return false;
             }
 
+            if (!string.Equals(bundle.PaidSnapshotId ?? string.Empty, _state.LastPaidSnapshotId ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                !bundle.PaidSnapshotProofIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).SequenceEqual(
+                    _state.LastPaidSnapshotProofIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase),
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                RecordNetworkEventNoLock(
+                    "state-paid-lineage-rejected",
+                    sourceEndpoint,
+                    "Rejected remote state because its paid lineage does not match locally validated payment history.",
+                    lockedTipSnapshot,
+                    lockedTipHeightSnapshot);
+                RequestDeferredHistorySaveNoLock();
+                return false;
+            }
+
+            if (validatedWorkSetProofs.Any(proof =>
+                    _state.LastPaidSnapshotProofIds.Contains(proof.ShareId, StringComparer.OrdinalIgnoreCase)))
+            {
+                RecordNetworkEventNoLock(
+                    "state-paid-proof-reintroduced",
+                    sourceEndpoint,
+                    "Rejected remote state because its unpaid reserve reintroduced a locally paid proof.",
+                    lockedTipSnapshot,
+                    lockedTipHeightSnapshot);
+                RequestDeferredHistorySaveNoLock();
+                return false;
+            }
+
             double localLockedTotalDifficulty = _state.WinnersList.Sum(x => x.Difficulty);
             const double difficultyEpsilon = 0.0000001;
-            bool prooflessFastForwardAllowed =
-                prooflessCurrentSnapshot &&
-                (localStateIsEmpty || bundle.CurrentRoundNumber > _state.CurrentRoundNumber);
             bool proofBackedRemoteBeatsProoflessLocal =
-                !prooflessCurrentSnapshot &&
                 validatedProofs.Count > 0 &&
                 bundle.CurrentRoundNumber == _state.CurrentRoundNumber &&
                 !CurrentStateHasShareProofsNoLock();
             bool remoteLooksStronger =
-                prooflessFastForwardAllowed ||
                 proofBackedRemoteBeatsProoflessLocal ||
-                (!prooflessCurrentSnapshot &&
-                 (localStateIsEmpty ||
-                  bundle.CurrentRoundNumber > _state.CurrentRoundNumber ||
-                  (bundle.CurrentRoundNumber == _state.CurrentRoundNumber &&
-                   !CurrentStateHasShareProofsNoLock() &&
-                   remoteLockedTotalDifficulty > localLockedTotalDifficulty + difficultyEpsilon)));
+                localStateIsEmpty ||
+                bundle.CurrentRoundNumber > _state.CurrentRoundNumber ||
+                (bundle.CurrentRoundNumber == _state.CurrentRoundNumber &&
+                 !CurrentStateHasShareProofsNoLock() &&
+                 remoteLockedTotalDifficulty > localLockedTotalDifficulty + difficultyEpsilon);
             if (!remoteLooksStronger)
             {
                 return false;
@@ -4279,8 +4428,6 @@ public class BootProtocolStateService
             {
                 _state.ActiveSnapshotProofIds = validatedProofs.Select(proof => proof.ShareId).ToList();
             }
-            _state.LastPaidSnapshotId = bundle.PaidSnapshotId;
-            _state.LastPaidSnapshotProofIds = (bundle.PaidSnapshotProofIds ?? []).ToList();
             foreach (BootPayoutSnapshotContext context in bundle.SnapshotContexts)
             {
                 UpsertSnapshotContextNoLock(context);
@@ -4316,7 +4463,7 @@ public class BootProtocolStateService
             lockedBundle.ValidParentBlockHashes = GetAcceptedParentBlockHashesNoLock();
             lockedBundle.ActiveSnapshotId = adoptedActiveSnapshotId;
             lockedBundle.ActiveSnapshotProofIds = _state.ActiveSnapshotProofIds.ToList();
-            lockedBundle.PaidSnapshotId = _state.LastPaidSnapshotId;
+            lockedBundle.PaidSnapshotId = _state.LastPaidSnapshotId ?? string.Empty;
             lockedBundle.PaidSnapshotProofIds = _state.LastPaidSnapshotProofIds.ToList();
             lockedBundle.SupportFeeEnabled = _poolConfig.GridLabsSupportFeeEnabled;
             lockedBundle.PayoutVariant = BuildPayoutVariantNoLock();
@@ -4329,13 +4476,11 @@ public class BootProtocolStateService
             _state.CandidateStateId = ComputeCandidateStateIdNoLock();
             CacheCurrentCandidateBundleNoLock();
             RecordNetworkEventNoLock(
-                prooflessCurrentSnapshot ? "state-adopted-proofless" : "state-adopted",
+                "state-adopted",
                 sourceEndpoint,
-                prooflessCurrentSnapshot
-                    ? "Fast-forwarded to a newer peer current state without share proofs."
-                    : (proofBackedRemoteBeatsProoflessLocal
-                        ? "Adopted a proof-backed peer current state over a proofless local state."
-                        : "Adopted a stronger locked current state from a peer."),
+                proofBackedRemoteBeatsProoflessLocal
+                    ? "Adopted a proof-backed peer current state over a proofless local state."
+                    : "Adopted a fully proof-backed locked current state from a peer.",
                 _state.CurrentTipBlockHash,
                 _state.CurrentTipBlockHeight);
             RequestDeferredSaveNoLock();
@@ -4604,160 +4749,40 @@ public class BootProtocolStateService
 
     public async Task<bool> TryBootstrapCurrentStateAsync(BootStateBundle bundle, string? observedTipBlockHash, long? observedTipBlockHeight, string sourceEndpoint)
     {
-        BootVersionCompatibilityDto compatibility = EvaluateStateBundleCompatibility(bundle);
-        if (!compatibility.CanSyncState)
+        if (bundle.ShareProofs.Count == 0 || bundle.WinnersList.Count == 0)
         {
-            _logger.LogDebug("Rejected bootstrap state from {SourceEndpoint}: {Reason}.", sourceEndpoint, compatibility.Reason);
             RecordExternalNetworkEvent(
-                "peer-version-mismatch",
+                "state-bootstrap-proofless-rejected",
                 sourceEndpoint,
-                $"Rejected bootstrap state bundle: {compatibility.Reason}.",
+                "Rejected peer bootstrap because its payout state cannot be reconstructed from included proofs.",
                 bundle.LockedByBlockHash ?? observedTipBlockHash,
                 bundle.LockedByBlockHeight ?? observedTipBlockHeight);
             return false;
         }
 
-        if (bundle.WinnersList.Count > _poolConfig.WinnersListSize ||
-            bundle.WorkSetProofs.Count > _poolConfig.WorkSetReserveLimit)
-        {
-            _logger.LogDebug(
-                "Rejected bootstrap state from {SourceEndpoint}: winners count {Count} exceeds configured shared slots {MaxCount}.",
-                sourceEndpoint,
-                bundle.WinnersList.Count,
-                _poolConfig.WinnersListSize);
-            return false;
-        }
-
-        string? lockedTip = NormalizeCanonicalBlockHash(bundle.LockedByBlockHash);
-        string? observedTip = NormalizeCanonicalBlockHash(observedTipBlockHash) ?? lockedTip;
-        long? lockedTipHeight = bundle.LockedByBlockHeight ?? observedTipBlockHeight;
-        List<string> bundleParentBlockHashes = bundle.ValidParentBlockHashes
-            .Select(NormalizeCanonicalBlockHash)
-            .Where(hash => !string.IsNullOrWhiteSpace(hash))
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (string.IsNullOrWhiteSpace(observedTip) || bundle.WinnersList.Count == 0)
-        {
-            _logger.LogDebug(
-                "Rejected bootstrap state from {SourceEndpoint}: missing observed tip or winners list.",
-                sourceEndpoint);
-            return false;
-        }
-
-        BootNetworkStatusDto networkStatus;
-        List<PayoutInfo> winnersSnapshot;
-        List<PayoutInfo> onDeckSnapshot;
-        bool adopted = false;
-
         lock (_sync)
         {
-            if (_poolConfig.EnablePeerTipStaleProtection &&
-                _state.ProvisionalTip != null &&
-                BitcoinHashes.AreEquivalent(observedTip, _state.ProvisionalTip.BlockHash))
+            if (!string.Equals(bundle.PaidSnapshotId ?? string.Empty, _state.LastPaidSnapshotId ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                !bundle.PaidSnapshotProofIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).SequenceEqual(
+                    _state.LastPaidSnapshotProofIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase),
+                    StringComparer.OrdinalIgnoreCase))
             {
                 RecordNetworkEventNoLock(
-                    "state-bootstrap-deferred-peer-tip",
+                    "state-bootstrap-paid-lineage-rejected",
                     sourceEndpoint,
-                    "Deferred peer bootstrap state until the local Bitcoin node validates the provisional block.",
-                    observedTip,
-                    lockedTipHeight);
+                    "Rejected peer bootstrap because paid history cannot be established from an untrusted state bundle.",
+                    bundle.LockedByBlockHash ?? observedTipBlockHash,
+                    bundle.LockedByBlockHeight ?? observedTipBlockHeight);
                 RequestDeferredHistorySaveNoLock();
                 return false;
             }
-
-            string? localTip = NormalizeCanonicalBlockHash(_state.CurrentTipBlockHash);
-            bool localStateIsEmpty = IsPlaceholderOrEmptyCurrentStateNoLock();
-            bool hasEstablishedState =
-                !localStateIsEmpty &&
-                (_state.ArchivedStateBundles.Any(existing => existing.WinnersList.Count > 0 || existing.ShareProofs.Count > 0) ||
-                 _state.WinnersList.Count > 1 ||
-                 (_state.WinnersList.Count == 1 && _state.WinnersList[0].Difficulty > 0));
-
-            if (hasEstablishedState)
-            {
-                _logger.LogDebug(
-                    "Rejected bootstrap state from {SourceEndpoint}: local node already has an established state {StateId}.",
-                    sourceEndpoint,
-                    _state.CurrentStateId);
-                return false;
-            }
-
-            if (!localStateIsEmpty &&
-                !string.IsNullOrWhiteSpace(localTip) &&
-                !BitcoinHashes.AreEquivalent(localTip, observedTip))
-            {
-                _logger.LogDebug(
-                    "Rejected bootstrap state from {SourceEndpoint}: local tip {LocalTip} does not match observed remote tip {RemoteTip}.",
-                    sourceEndpoint,
-                    localTip,
-                    observedTip);
-                return false;
-            }
-
-            _state.CurrentTipBlockHash = observedTip;
-            _state.CurrentTipBlockHeight = observedTipBlockHeight ?? bundle.LockedByBlockHeight;
-            SetAcceptedParentBlockHashesNoLock(bundleParentBlockHashes, observedTip);
-            _state.CurrentStateId = string.IsNullOrWhiteSpace(bundle.StateId)
-                ? ComputeStateIdFromPayoutsNoLock(bundle.WinnersList, lockedTip)
-                : bundle.StateId;
-            _state.CurrentRoundNumber = Math.Max(0, bundle.CurrentRoundNumber);
-            _state.LastRotationUtc = bundle.CreatedAtUtc == default ? DateTime.UtcNow : bundle.CreatedAtUtc;
-            _state.WinnersList = ClonePayouts(bundle.WinnersList);
-            _state.ActiveSnapshotId = string.IsNullOrWhiteSpace(bundle.ActiveSnapshotId) ? _state.CurrentStateId : bundle.ActiveSnapshotId;
-            _state.ActiveSnapshotProofIds = (bundle.ActiveSnapshotProofIds ?? []).ToList();
-            _state.LastPaidSnapshotId = bundle.PaidSnapshotId;
-            _state.LastPaidSnapshotProofIds = (bundle.PaidSnapshotProofIds ?? []).ToList();
-            foreach (BootPayoutSnapshotContext context in bundle.SnapshotContexts)
-            {
-                UpsertSnapshotContextNoLock(context);
-            }
-            _state.OnDeckProofs = SortAndTrimProofs(bundle.WorkSetProofs, _poolConfig.WorkSetReserveLimit);
-            RebuildOnDeckListNoLock();
-
-            BootStateBundle lockedBundle = CloneBundle(bundle);
-            lockedBundle.PreviousStateId = bundle.PreviousStateId;
-            lockedBundle.CurrentRoundNumber = Math.Max(0, bundle.CurrentRoundNumber);
-            lockedBundle.LockedByBlockHash = lockedTip;
-            lockedBundle.LockedByBlockHeight = lockedTipHeight;
-            lockedBundle.ValidParentBlockHashes = GetAcceptedParentBlockHashesNoLock();
-            lockedBundle.WinnersList = ClonePayouts(bundle.WinnersList);
-            lockedBundle.ProofWinnersList = ClonePayouts(bundle.ProofWinnersList);
-            lockedBundle.WorkSetProofs = _state.OnDeckProofs.Select(CloneProof).ToList();
-            lockedBundle.Commitment = BuildCommitmentNoLock();
-            UpsertArchivedBundleNoLock(lockedBundle);
-
-            _state.CandidateStateId = ComputeCandidateStateIdNoLock();
-            CacheCurrentCandidateBundleNoLock();
-            RecordNetworkEventNoLock(
-                "state-bootstrapped",
-                sourceEndpoint,
-                "Bootstrapped current locked state from a peer.",
-                _state.CurrentTipBlockHash,
-                _state.CurrentTipBlockHeight);
-            RequestDeferredSaveNoLock();
-            RequestDeferredHistorySaveNoLock();
-
-            winnersSnapshot = ClonePayouts(_state.WinnersList);
-            onDeckSnapshot = ClonePayouts(_state.OnDeckList);
-            networkStatus = BuildNetworkStatusNoLock();
-            adopted = true;
         }
 
-        if (adopted)
-        {
-            _logger.LogWarning(
-                "Bootstrapped current state {StateId} from {SourceEndpoint} without local chain context. This state should be cross-checked by subsequent peer sync.",
-                bundle.StateId,
-                sourceEndpoint);
-            await _hubContext.Clients.All.SendAsync("UpdateWinners", winnersSnapshot);
-            await _hubContext.Clients.All.SendAsync("UpdateOnDeck", onDeckSnapshot);
-            await _hubContext.Clients.All.SendAsync("UpdateNetworkState", networkStatus);
-            await _hubContext.Clients.All.SendAsync("UpdateRoundHistory", GetRoundHistory());
-            await NotifyWinnersListChangedAsync($"bootstrap-state:{sourceEndpoint}");
-        }
-
-        return adopted;
+        return await TryAdoptCurrentStateAsync(
+            bundle,
+            observedTipBlockHash,
+            observedTipBlockHeight,
+            sourceEndpoint);
     }
 
     public async Task<bool> TrySyncCurrentRoundMetadataAsync(
@@ -5554,24 +5579,22 @@ public class BootProtocolStateService
         };
     }
 
-    private bool IsNewDirectIngressPreviousParentProofNoLock(string? shareId, string? parentBlockHash)
+    private bool IsNewDirectIngressOutsideActiveParentNoLock(string? shareId, string? parentBlockHash)
     {
         if (string.IsNullOrWhiteSpace(parentBlockHash))
         {
             return false;
         }
 
-        BootPayoutSnapshotContext? active = GetSnapshotContextNoLock(_state.ActiveSnapshotId);
-        BootPayoutSnapshotContext? predecessor = GetSnapshotContextNoLock(active?.PreviousSnapshotId);
-        string? finalizedPreviousParent = NormalizeCanonicalBlockHash(predecessor?.LockedByBlockHash);
-        if (string.IsNullOrWhiteSpace(finalizedPreviousParent) ||
-            !BitcoinHashes.AreEquivalent(parentBlockHash, finalizedPreviousParent))
+        if (_state.OnDeckProofs.Any(proof =>
+                string.Equals(proof.ShareId, shareId, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
 
-        return !_state.OnDeckProofs.Any(proof =>
-            string.Equals(proof.ShareId, shareId, StringComparison.OrdinalIgnoreCase));
+        string? currentTip = NormalizeCanonicalBlockHash(_state.CurrentTipBlockHash);
+        return !string.IsNullOrWhiteSpace(currentTip) &&
+               !BitcoinHashes.AreEquivalent(parentBlockHash, currentTip);
     }
 
     private void RestorePredecessorForRemovedBoundaryNoLock(
@@ -5579,19 +5602,25 @@ public class BootProtocolStateService
         string replacementBlockHash,
         long replacementBlockHeight)
     {
-        BootSnapshotFamilyState? removedFamily = GetActiveSnapshotFamilyNoLock();
-        if (removedFamily == null ||
-            removedFamily.BoundaryBlockHeight != replacementBlockHeight ||
-            BitcoinHashes.AreEquivalent(removedFamily.BoundaryBlockHash, replacementBlockHash))
+        while (true)
         {
-            return;
-        }
+            BootSnapshotFamilyState? removedFamily = GetActiveSnapshotFamilyNoLock();
+            if (removedFamily == null ||
+                removedFamily.BoundaryBlockHeight < replacementBlockHeight ||
+                (removedFamily.BoundaryBlockHeight == replacementBlockHeight &&
+                 BitcoinHashes.AreEquivalent(removedFamily.BoundaryBlockHash, replacementBlockHash)))
+            {
+                return;
+            }
 
-        removedFamily.IsOpen = false;
-        removedFamily.BoundaryOnActiveChain = false;
-        BootPayoutSnapshotContext? predecessor = GetSnapshotContextNoLock(removedFamily.PredecessorSnapshotId);
-        if (predecessor != null)
-        {
+            removedFamily.IsOpen = false;
+            removedFamily.BoundaryOnActiveChain = false;
+            BootPayoutSnapshotContext? predecessor = GetSnapshotContextNoLock(removedFamily.PredecessorSnapshotId);
+            if (predecessor == null)
+            {
+                return;
+            }
+
             _state.ActiveSnapshotId = predecessor.SnapshotId;
             _state.ActiveSnapshotProofIds = predecessor.ProofIds.ToList();
             _state.WinnersList = ClonePayouts(predecessor.WinnersList);
@@ -5599,14 +5628,14 @@ public class BootProtocolStateService
             _state.CurrentRoundNumber = Math.Max(0, predecessor.CurrentRoundNumber);
             _state.CurrentTipBlockHash = NormalizeCanonicalBlockHash(predecessor.LockedByBlockHash);
             _state.CurrentTipBlockHeight = predecessor.LockedByBlockHeight;
-        }
 
-        RecordNetworkEventNoLock(
-            "snapshot-family-reorg",
-            source,
-            $"Deactivated snapshot family {removedFamily.FamilyId} after boundary {removedFamily.BoundaryBlockHash} left the active chain.",
-            replacementBlockHash,
-            replacementBlockHeight);
+            RecordNetworkEventNoLock(
+                "snapshot-family-reorg",
+                source,
+                $"Deactivated snapshot family {removedFamily.FamilyId} after boundary {removedFamily.BoundaryBlockHash} left the active chain.",
+                replacementBlockHash,
+                replacementBlockHeight);
+        }
     }
 
     private void EnsureActiveSnapshotNoLock(DateTime nowUtc)
@@ -10389,59 +10418,6 @@ public class BootProtocolStateService
         {
             RecordNetworkEventNoLock(eventType, source, message, blockHash, blockHeight: null);
             RequestDeferredHistorySaveNoLock();
-        }
-    }
-
-    private bool TryLearnFreshParentFromTrustedShare(
-        string source,
-        BootShareValidationResult validation,
-        string expectedStateId)
-    {
-        if (!IsTrustedFreshParentSource(source) ||
-            string.IsNullOrWhiteSpace(validation.PrevBlockHash))
-        {
-            return false;
-        }
-
-        lock (_sync)
-        {
-            if (!string.Equals(expectedStateId, _state.CurrentStateId, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (IsAcceptedParentBlockHashNoLock(validation.PrevBlockHash))
-            {
-                return true;
-            }
-
-            if (_poolConfig.EnablePeerTipStaleProtection && _state.ProvisionalTip != null)
-            {
-                RecordNetworkEventNoLock(
-                    "fresh-parent-deferred",
-                    source,
-                    "Did not learn a new parent from DATUM while a peer-tip boundary awaited local Bitcoin validation.",
-                    validation.PrevBlockHash,
-                    blockHeight: null);
-                RequestDeferredHistorySaveNoLock();
-                return false;
-            }
-
-            RememberAcceptedParentBlockHashNoLock(validation.PrevBlockHash);
-            if (string.IsNullOrWhiteSpace(_state.CurrentTipBlockHash))
-            {
-                _state.CurrentTipBlockHash = validation.PrevBlockHash;
-                _state.CandidateStateId = ComputeCandidateStateIdNoLock();
-            }
-            RecordNetworkEventNoLock(
-                "fresh-parent-learned",
-                source,
-                $"Learned fresh parent from otherwise-valid local share at difficulty {ClientHandler.FormatDifficulty(validation.Difficulty)}.",
-                validation.PrevBlockHash,
-                blockHeight: null);
-            RequestDeferredSaveNoLock();
-            RequestDeferredHistorySaveNoLock();
-            return true;
         }
     }
 

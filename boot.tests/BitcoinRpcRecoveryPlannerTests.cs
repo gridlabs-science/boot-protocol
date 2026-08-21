@@ -42,12 +42,12 @@ public sealed class BitcoinRpcRecoveryPlannerTests
             100,
             "new-block-100");
 
-        CollectionAssert.AreEqual(new long[] { 100 }, plan.Heights.ToArray());
+        CollectionAssert.AreEqual(new long[] { 99, 100 }, plan.Heights.ToArray());
         Assert.IsTrue(plan.Reorganization);
     }
 
     [TestMethod]
-    public void LowerRpcHeightPausesUntilReplacementChainCatchesUp()
+    public void LowerRpcHeightReplaysReplacementTipAndParent()
     {
         BitcoinRpcRecoveryPlan plan = BitcoinRpcRecoveryPlanner.Build(
             101,
@@ -55,7 +55,7 @@ public sealed class BitcoinRpcRecoveryPlannerTests
             100,
             "replacement-block-100");
 
-        Assert.AreEqual(0, plan.Heights.Count);
+        CollectionAssert.AreEqual(new long[] { 99, 100 }, plan.Heights.ToArray());
         Assert.IsTrue(plan.Reorganization);
     }
 

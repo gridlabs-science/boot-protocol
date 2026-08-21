@@ -124,21 +124,13 @@ public sealed class BitcoinRpcReconciliationService : BackgroundService
             localHash,
             rpcHeight,
             rpcBestHash);
-        if (plan.Reorganization && plan.Heights.Count == 0)
-        {
-            _health.RecordRpcTipMismatch(
-                $"Bitcoin RPC active height {rpcHeight} is behind GridPool observed height {localHeight}; waiting for the replacement chain before resuming mining.",
-                DateTime.UtcNow);
-            return 0;
-        }
-
         int recovered = 0;
         foreach (long height in plan.Heights)
         {
             string hash = height == rpcHeight
                 ? rpcBestHash
                 : await _rpcClient.GetBlockHashAsync(height, cancellationToken);
-            await ObserveRpcBlockAsync(height, hash, cancellationToken);
+            await ObserveRpcBlockAsync(height, hash, plan.Reorganization, cancellationToken);
             if (!plan.EstablishesBaseline)
             {
                 recovered++;
@@ -151,6 +143,7 @@ public sealed class BitcoinRpcReconciliationService : BackgroundService
     private async Task ObserveRpcBlockAsync(
         long height,
         string blockHash,
+        bool reorganization,
         CancellationToken cancellationToken)
     {
         string headerHex = await _rpcClient.GetBlockHeaderHexAsync(blockHash, cancellationToken);
@@ -162,7 +155,7 @@ public sealed class BitcoinRpcReconciliationService : BackgroundService
             height);
         await _stateService.ObserveChainTipAsync(
             blockHash,
-            "rpc-reconcile",
+            reorganization ? "rpc-reconcile-reorg" : "rpc-reconcile",
             height);
     }
 

@@ -977,6 +977,7 @@ public class ShareRecordingResult
     public bool NewRecord { get; set; }
     public bool AffectedOnDeck { get; set; }
     public double ComputedDifficulty { get; set; }
+    public bool BlockCandidate { get; set; }
     public bool IsBlock { get; set; }
     public string BlockHash { get; set; } = string.Empty;
     public BootShareProof? AcceptedProof { get; set; }

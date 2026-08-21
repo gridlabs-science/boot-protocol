@@ -16,6 +16,7 @@ public class DatumServer : BackgroundService
     private readonly BootProtocolStateService _stateService;
     private readonly ILogger<DatumServer> _logger;
     private readonly ConcurrentDictionary<int, (TcpClient Client, ClientHandler Handler)> _activeClients = new();
+    private readonly SemaphoreSlim _connectionSlots;
     private int _nextClientId;
 
     public static BootProtocolStateService StateService { get; private set; } = null!;
@@ -42,6 +43,7 @@ public class DatumServer : BackgroundService
         _poolConfig = poolConfig;
         _stateService = stateService;
         _logger = logger;
+        _connectionSlots = new SemaphoreSlim(poolConfig.DatumMaxConnections, poolConfig.DatumMaxConnections);
         StateService = stateService;
         PoolPort = port;
         _stateService.WinnersListChanged += HandleWinnersListChangedAsync;
@@ -69,6 +71,14 @@ public class DatumServer : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var client = await _listener.AcceptTcpClientAsync(stoppingToken);
+            if (!_connectionSlots.Wait(0))
+            {
+                _logger.LogWarning(
+                    "Rejected DATUM connection because the configured limit of {Limit} active sessions was reached.",
+                    _poolConfig.DatumMaxConnections);
+                client.Dispose();
+                continue;
+            }
             int clientId = Interlocked.Increment(ref _nextClientId);
             var clientHandler = new ClientHandler(client, _serverKey, _serverXKey, _poolConfig, _stateService, stoppingToken);
             _activeClients[clientId] = (client, clientHandler);
@@ -82,6 +92,7 @@ public class DatumServer : BackgroundService
                 {
                     _activeClients.TryRemove(clientId, out _);
                     client.Dispose();
+                    _connectionSlots.Release();
                 }
             }, stoppingToken);
         }

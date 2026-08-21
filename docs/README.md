@@ -30,6 +30,9 @@ documentation.
   coordinated-upgrade policy.
 - [Security And Privacy Review](security-privacy-review.md): active pre-package
   gate for key handling, public UI/API disclosure, logs, and private-node safety.
+- [Critical State-Validation Security Release](security-release-rt-2026-041-042.md):
+  release-candidate behavior and retest gate for proof-backed state sync and
+  locally confirmed GridPool block payments.
 
 ## Operators
 

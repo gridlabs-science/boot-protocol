@@ -293,6 +293,7 @@ public class MiningApiController : ControllerBase
                     relayStage = result.RelayStage,
                     pulseAccepted = result.PulseAccepted,
                     affectedConsensusState = result.AffectedConsensusState,
+                    blockCandidate = result.BlockCandidate,
                     isBlock = result.IsBlock,
                     blockHash = result.BlockHash,
                     stateId = result.IsBlock

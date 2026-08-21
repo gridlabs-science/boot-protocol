@@ -127,6 +127,7 @@ public class BootPeerController : ControllerBase
                 ? result.NetworkStatus.CurrentStateId
                 : result.NetworkStatus.CandidateStateId,
             difficulty = result.ComputedDifficulty,
+            blockCandidate = result.BlockCandidate,
             isBlock = result.IsBlock,
             blockHash = result.BlockHash
         });
