@@ -10,7 +10,8 @@ public sealed record BitcoinBlockchainInfo(
     long Headers,
     string BestBlockHash,
     bool InitialBlockDownload,
-    double? VerificationProgress);
+    double? VerificationProgress,
+    string Chain = "");
 
 public sealed record BitcoinZmqPublisher(string Topic, string Address);
 public sealed record BitcoinNetworkInfo(int Connections, int ConnectionsIn, int ConnectionsOut);
@@ -54,7 +55,8 @@ public sealed class BitcoinRpcClient : IBitcoinRpcClient
             result.GetProperty("headers").GetInt64(),
             result.GetProperty("bestblockhash").GetString() ?? string.Empty,
             result.TryGetProperty("initialblockdownload", out JsonElement ibd) && ibd.GetBoolean(),
-            result.TryGetProperty("verificationprogress", out JsonElement progress) ? progress.GetDouble() : null);
+            result.TryGetProperty("verificationprogress", out JsonElement progress) ? progress.GetDouble() : null,
+            result.TryGetProperty("chain", out JsonElement chain) ? chain.GetString() ?? string.Empty : string.Empty);
     }
 
     public async Task<string> GetBestBlockHashAsync(CancellationToken cancellationToken)

@@ -1,23 +1,23 @@
 ARG GRIDPOOL_RELEASE_VERSION=dev
 
-FROM node:24-bookworm-slim AS dashboard-build
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS dashboard-build
 WORKDIR /src/boot_portal/ui
 COPY boot_portal/ui/package.json boot_portal/ui/package-lock.json ./
 RUN npm ci
 COPY boot_portal/ui/ ./
 RUN npm run build
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:4ea6fe75dd36706bb6d8c3c293d4c4315840f5d76ea28ac97def77e3ec487fa5 AS build
 WORKDIR /src
 
 COPY boot_portal/boot_portal.csproj boot_portal/
-RUN dotnet restore boot_portal/boot_portal.csproj
+RUN dotnet restore boot_portal/boot_portal.csproj --locked-mode
 
 COPY . .
 COPY --from=dashboard-build /src/boot_portal/wwwroot/dashboard boot_portal/wwwroot/dashboard
 RUN dotnet publish boot_portal/boot_portal.csproj -c Release -o /app/publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble@sha256:1fe86375600b62e6566b465da9553eef0621f13c67f40fe764cd8dbb1dee1497 AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libsodium23 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \

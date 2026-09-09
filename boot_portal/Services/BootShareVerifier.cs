@@ -286,7 +286,7 @@ public class BootShareVerifier
                 IsValid = true,
                 ShareId = shareId,
                 MinerAddress = normalizedMinerAddress,
-                Username = string.IsNullOrWhiteSpace(username) ? normalizedMinerAddress : username,
+                Username = NormalizeUsernameForStorage(username, normalizedMinerAddress),
                 ScriptPubKeyHex = scriptPubKeyHex,
                 HeaderHex = normalizedHeaderHex,
                 CoinbaseHex = normalizedCoinbaseHex,
@@ -305,6 +305,26 @@ public class BootShareVerifier
         {
             return Invalid(ex.Message);
         }
+    }
+
+    internal static string NormalizeUsernameForStorage(string? username, string fallbackAddress)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return fallbackAddress;
+        }
+
+        string trimmed = username.Trim();
+        var safe = new StringBuilder(Math.Min(trimmed.Length, 128));
+        foreach (char value in trimmed.Take(128))
+        {
+            safe.Append(char.IsAsciiLetterOrDigit(value) || value is '.' or '_' or '-' or ':'
+                ? value
+                : '_');
+        }
+
+        string normalized = safe.ToString().Trim('_');
+        return string.IsNullOrWhiteSpace(normalized) ? fallbackAddress : normalized;
     }
 
     private string ExtractSlotZeroAddress(byte[] scriptPubKey)

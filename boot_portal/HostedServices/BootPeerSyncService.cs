@@ -18,6 +18,7 @@ public class BootPeerSyncService : BackgroundService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<BootPeerSyncService> _logger;
     private readonly BootPeerLoopHealth _loopHealth;
+    private readonly PeerBundleFetchLimiter _bundleFetchLimiter;
 
     public BootPeerSyncService(
         PoolConfig poolConfig,
@@ -35,6 +36,9 @@ public class BootPeerSyncService : BackgroundService
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _loopHealth = loopHealth;
+        _bundleFetchLimiter = new PeerBundleFetchLimiter(
+            Math.Max(1, poolConfig.PeerStateBundleFetchRateLimitPerMinute),
+            TimeSpan.FromMinutes(1));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -306,6 +310,12 @@ public class BootPeerSyncService : BackgroundService
             !string.Equals(remote.CurrentStateId, local.CurrentStateId, StringComparison.OrdinalIgnoreCase) &&
             ShouldFetchRemoteCurrentState(local, remote))
         {
+            if (!_bundleFetchLimiter.TryAcquire(remoteEndpoint, DateTime.UtcNow))
+            {
+                RecordBundleFetchRateLimit(remoteEndpoint, remote.CurrentStateId);
+                return;
+            }
+
             BootStateBundle? lockedBundle = await client.GetFromJsonAsync<BootStateBundle>(
                 $"{remoteEndpoint}/api/network/state/{remote.CurrentStateId}",
                 stoppingToken);
@@ -349,9 +359,14 @@ public class BootPeerSyncService : BackgroundService
         }
 
         if (string.IsNullOrWhiteSpace(remote.CandidateStateId) ||
-            string.Equals(remote.CandidateStateId, local.CandidateStateId, StringComparison.OrdinalIgnoreCase) ||
-            remote.OnDeckTotalDifficulty <= local.OnDeckTotalDifficulty)
+            string.Equals(remote.CandidateStateId, local.CandidateStateId, StringComparison.OrdinalIgnoreCase))
         {
+            return;
+        }
+
+        if (!_bundleFetchLimiter.TryAcquire(remoteEndpoint, DateTime.UtcNow))
+        {
+            RecordBundleFetchRateLimit(remoteEndpoint, remote.CandidateStateId);
             return;
         }
 
@@ -375,6 +390,18 @@ public class BootPeerSyncService : BackgroundService
         }
 
         await _stateService.TryImportCandidateStateAsync(bundle, remoteEndpoint);
+    }
+
+    private void RecordBundleFetchRateLimit(string remoteEndpoint, string stateId)
+    {
+        _logger.LogWarning(
+            "Deferred state bundle {StateId} from {Peer}: per-peer fetch budget exhausted.",
+            stateId,
+            remoteEndpoint);
+        _stateService.RecordExternalNetworkEvent(
+            "peer-state-bundle-fetch-rate-limited",
+            remoteEndpoint,
+            "Deferred outbound state bundle fetch because the peer exhausted its per-minute budget.");
     }
 
     private async Task FetchPeerAddressesAsync(HttpClient client, string remoteEndpoint, CancellationToken stoppingToken)

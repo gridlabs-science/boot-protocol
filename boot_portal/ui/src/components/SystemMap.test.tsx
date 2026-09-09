@@ -354,7 +354,11 @@ describe("GridPool system map", () => {
 
   it("settles motion immediately for reduced-motion observers", () => {
     vi.useFakeTimers();
-    const matchMedia = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    const originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn((query: string) => ({
       matches: query.includes("prefers-reduced-motion"),
       media: query,
       onchange: null,
@@ -363,7 +367,8 @@ describe("GridPool system map", () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn()
-    }));
+      }))
+    });
     const complete = vi.fn();
     render(
       <SystemMap
@@ -376,7 +381,11 @@ describe("GridPool system map", () => {
 
     act(() => vi.advanceTimersByTime(180));
     expect(complete).toHaveBeenCalledOnce();
-    matchMedia.mockRestore();
+    if (originalMatchMedia) {
+      Object.defineProperty(window, "matchMedia", originalMatchMedia);
+    } else {
+      delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+    }
     vi.useRealTimers();
   });
 });

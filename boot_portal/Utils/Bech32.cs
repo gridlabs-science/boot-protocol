@@ -10,7 +10,7 @@ public static class Bech32
         int sepIndex = address.LastIndexOf('1');
         if (sepIndex < 1) throw new FormatException("Invalid Bech32 address: no separator");
         string hrp = address.Substring(0, sepIndex).ToLower();
-        if (hrp != "bc" && hrp != "tb") throw new FormatException($"Invalid HRP: {hrp}");
+        if (hrp != "bc" && hrp != "tb" && hrp != "bcrt") throw new FormatException($"Invalid HRP: {hrp}");
 
         string dataPart = address.Substring(sepIndex + 1);
         if (dataPart.Length < 6) throw new FormatException("Bech32 data too short");
@@ -76,7 +76,7 @@ public static class Bech32
 
     public static string Encode(string hrp, int version, byte[] program)
     {
-        if (hrp != "bc" && hrp != "tb") throw new ArgumentException($"Invalid HRP: {hrp}");
+        if (hrp != "bc" && hrp != "tb" && hrp != "bcrt") throw new ArgumentException($"Invalid HRP: {hrp}");
         if (version < 0 || version > 16) throw new ArgumentException($"Invalid witness version: {version}");
         if (program.Length < 2 || program.Length > 40) throw new ArgumentException($"Invalid program length: {program.Length}");
         

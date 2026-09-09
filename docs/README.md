@@ -35,6 +35,8 @@ documentation.
 - [Critical State-Validation Security Release](security-release-rt-2026-041-042.md):
   release-candidate behavior and retest gate for proof-backed state sync and
   locally confirmed GridPool block payments.
+- [Regtest Release-Retest Lab](regtest-release-retest.md): isolated two-node
+  setup, normal lifecycle checks, convergence verification, and evidence capture.
 
 ## Operators
 

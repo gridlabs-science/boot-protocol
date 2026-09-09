@@ -7,13 +7,20 @@ namespace boot.tests;
 [TestClass]
 public sealed class PoolConfigValidatorTests
 {
+    private const string MainnetPayoutAddress = "bc1qd9m04z95mglaxd9e9accmhyjdlmkfmzjprkq4p";
+
     [TestMethod]
-    public void DefaultCoinbaseTagIsGridPool()
+    public void SetupUiMayStartWithoutPayoutButHeadlessModeCannot()
     {
         var config = new PoolConfig();
 
         Assert.AreEqual("Grid Pool", config.CoinbaseTag);
-        CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
+        Assert.IsFalse(PoolConfigValidator.Validate(config).Any(error =>
+            error.Contains("pool_payout_script", StringComparison.OrdinalIgnoreCase)));
+
+        config.EnableWebUi = false;
+        Assert.IsTrue(PoolConfigValidator.Validate(config).Any(error =>
+            error.Contains("pool_payout_script", StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]
@@ -130,7 +137,9 @@ public sealed class PoolConfigValidatorTests
     {
         var config = new PoolConfig
         {
-            CoinbaseTag = string.Empty
+            CoinbaseTag = string.Empty,
+            PoolPayoutScript = MainnetPayoutAddress,
+            EnableAdminApi = false
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
@@ -207,6 +216,7 @@ public sealed class PoolConfigValidatorTests
         {
             BitcoinNetwork = BitcoinScript.Testnet4,
             PoolPayoutScript = testnetAddress,
+            EnableAdminApi = false
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(validConfig));
@@ -222,12 +232,64 @@ public sealed class PoolConfigValidatorTests
     {
         var config = new PoolConfig
         {
-            BitcoinNetwork = "regtest"
+            BitcoinNetwork = "signet"
         };
 
         List<string> errors = PoolConfigValidator.Validate(config);
 
         Assert.IsTrue(errors.Any(error => error.Contains("bitcoin_network", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public void RegtestUsesBcrtAddressesAndRejectsMainnetAddresses()
+    {
+        byte[] script = Enumerable.Range(0, 22).Select(i => (byte)i).ToArray();
+        script[0] = 0x00;
+        script[1] = 0x14;
+        string regtestAddress = BitcoinScript.ScriptToAddress(script, BitcoinScript.Regtest);
+        var config = new PoolConfig
+        {
+            BitcoinNetwork = BitcoinScript.Regtest,
+            PoolPayoutScript = regtestAddress,
+            EnableAdminApi = false
+        };
+
+        Assert.IsTrue(regtestAddress.StartsWith("bcrt1", StringComparison.OrdinalIgnoreCase));
+        CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
+
+        config.PoolPayoutScript = "bc1qrwsx8fs0l6z7ugp5cvzy6lhss7jlyru3kg9s8y";
+        Assert.IsTrue(PoolConfigValidator.Validate(config).Any(error =>
+            error.Contains("pool_payout_script", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public void EmptySnapshotBootstrapIsRestrictedToNonProductionRegtest()
+    {
+        var regtest = new PoolConfig
+        {
+            BitcoinNetwork = BitcoinScript.Regtest,
+            NodeMode = "development",
+            AllowEmptySnapshotBootstrap = true
+        };
+        var mainnet = new PoolConfig
+        {
+            BitcoinNetwork = BitcoinScript.Mainnet,
+            NodeMode = "development",
+            AllowEmptySnapshotBootstrap = true
+        };
+        var productionRegtest = new PoolConfig
+        {
+            BitcoinNetwork = BitcoinScript.Regtest,
+            NodeMode = "production",
+            AllowEmptySnapshotBootstrap = true
+        };
+
+        Assert.IsFalse(PoolConfigValidator.Validate(regtest).Any(error =>
+            error.Contains("allow_empty_snapshot_bootstrap", StringComparison.OrdinalIgnoreCase)));
+        Assert.IsTrue(PoolConfigValidator.Validate(mainnet).Any(error =>
+            error.Contains("allow_empty_snapshot_bootstrap", StringComparison.OrdinalIgnoreCase)));
+        Assert.IsTrue(PoolConfigValidator.Validate(productionRegtest).Any(error =>
+            error.Contains("allow_empty_snapshot_bootstrap", StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]
@@ -250,7 +312,9 @@ public sealed class PoolConfigValidatorTests
         {
             NodeMode = "sovereign",
             PublicBaseUrl = "http://edge-node.local:5000",
-            DatumPublicHost = "edge-node.local"
+            DatumPublicHost = "edge-node.local",
+            PoolPayoutScript = MainnetPayoutAddress,
+            EnableAdminApi = false
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
@@ -301,7 +365,8 @@ public sealed class PoolConfigValidatorTests
             PublicBaseUrl = "https://use1.gridlabs.science",
             DatumPublicHost = "datum-use1.gridlabs.science",
             EnableAdminApi = false,
-            TestingRoundResetMode = "none"
+            TestingRoundResetMode = "none",
+            PoolPayoutScript = MainnetPayoutAddress
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
@@ -335,7 +400,8 @@ public sealed class PoolConfigValidatorTests
             DatumPublicHost = "datum-use1.gridlabs.science",
             EnableAdminApi = true,
             AdminApiKey = new string('a', 32),
-            TestingRoundResetMode = "none"
+            TestingRoundResetMode = "none",
+            PoolPayoutScript = MainnetPayoutAddress
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));

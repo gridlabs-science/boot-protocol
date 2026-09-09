@@ -6,6 +6,7 @@ public static class BitcoinScript
 {
     public const string Mainnet = "mainnet";
     public const string Testnet4 = "testnet4";
+    public const string Regtest = "regtest";
 
     public static string NormalizeNetwork(string? network)
     {
@@ -14,7 +15,8 @@ public static class BitcoinScript
         {
             "" or "main" or "mainnet" => Mainnet,
             "test" or "testnet" or "testnet3" or "testnet4" => Testnet4,
-            _ => throw new InvalidOperationException($"Unsupported bitcoin_network '{network}'. Expected mainnet or testnet4.")
+            "regtest" => Regtest,
+            _ => throw new InvalidOperationException($"Unsupported bitcoin_network '{network}'. Expected mainnet, testnet4, or regtest.")
         };
     }
 
@@ -63,10 +65,11 @@ public static class BitcoinScript
         }
 
         if (normalized.StartsWith("bc1", StringComparison.OrdinalIgnoreCase) ||
-            normalized.StartsWith("tb1", StringComparison.OrdinalIgnoreCase))
+            normalized.StartsWith("tb1", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("bcrt1", StringComparison.OrdinalIgnoreCase))
         {
             var (hrp, version, program) = Bech32.Decode(normalized);
-            string expectedHrp = normalizedNetwork == Testnet4 ? "tb" : "bc";
+            string expectedHrp = GetBech32Hrp(normalizedNetwork);
             if (!string.Equals(hrp, expectedHrp, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Address {address} is not valid for bitcoin_network {normalizedNetwork}.");
@@ -96,8 +99,8 @@ public static class BitcoinScript
         {
             0x00 when normalizedNetwork == Mainnet => BuildP2PkhScript(payload),
             0x05 when normalizedNetwork == Mainnet => BuildP2ShScript(payload),
-            0x6f when normalizedNetwork == Testnet4 => BuildP2PkhScript(payload),
-            0xc4 when normalizedNetwork == Testnet4 => BuildP2ShScript(payload),
+            0x6f when normalizedNetwork != Mainnet => BuildP2PkhScript(payload),
+            0xc4 when normalizedNetwork != Mainnet => BuildP2ShScript(payload),
             _ => throw new InvalidOperationException($"Unsupported Base58 version 0x{payload[0]:X2} for address {address}.")
         };
     }
@@ -128,7 +131,7 @@ public static class BitcoinScript
             script[24] == 0xAC)
         {
             byte[] payload = new byte[21];
-            payload[0] = normalizedNetwork == Testnet4 ? (byte)0x6f : (byte)0x00;
+            payload[0] = normalizedNetwork == Mainnet ? (byte)0x00 : (byte)0x6f;
             Array.Copy(script, 3, payload, 1, 20);
             return Base58Check.Encode(payload);
         }
@@ -139,7 +142,7 @@ public static class BitcoinScript
             script[22] == 0x87)
         {
             byte[] payload = new byte[21];
-            payload[0] = normalizedNetwork == Testnet4 ? (byte)0xc4 : (byte)0x05;
+            payload[0] = normalizedNetwork == Mainnet ? (byte)0x05 : (byte)0xc4;
             Array.Copy(script, 2, payload, 1, 20);
             return Base58Check.Encode(payload);
         }
@@ -147,23 +150,31 @@ public static class BitcoinScript
         if (script.Length == 22 && script[0] == 0x00 && script[1] == 0x14)
         {
             byte[] program = script.Skip(2).Take(20).ToArray();
-            return Bech32.Encode(normalizedNetwork == Testnet4 ? "tb" : "bc", 0, program);
+            return Bech32.Encode(GetBech32Hrp(normalizedNetwork), 0, program);
         }
 
         if (script.Length == 34 && script[0] == 0x00 && script[1] == 0x20)
         {
             byte[] program = script.Skip(2).Take(32).ToArray();
-            return Bech32.Encode(normalizedNetwork == Testnet4 ? "tb" : "bc", 0, program);
+            return Bech32.Encode(GetBech32Hrp(normalizedNetwork), 0, program);
         }
 
         if (script.Length == 34 && script[0] == 0x51 && script[1] == 0x20)
         {
             byte[] program = script.Skip(2).Take(32).ToArray();
-            return Bech32.Encode(normalizedNetwork == Testnet4 ? "tb" : "bc", 1, program);
+            return Bech32.Encode(GetBech32Hrp(normalizedNetwork), 1, program);
         }
 
         return "UNKNOWN";
     }
+
+    private static string GetBech32Hrp(string normalizedNetwork) => normalizedNetwork switch
+    {
+        Mainnet => "bc",
+        Testnet4 => "tb",
+        Regtest => "bcrt",
+        _ => throw new InvalidOperationException($"Unsupported bitcoin network '{normalizedNetwork}'.")
+    };
 
     private static byte[] BuildP2PkhScript(byte[] payload)
     {

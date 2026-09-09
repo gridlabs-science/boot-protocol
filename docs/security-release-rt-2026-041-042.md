@@ -1,13 +1,16 @@
 # GridPool Critical State-Validation Security Release
 
-Status: release candidate for independent red-team verification.
+Status: original critical findings independently verified; follow-up candidate
+required for RT-2026-076 and complete regtest transition coverage.
 
 Integration note (2026-08-24): the exact candidate `400fc6e` is preserved at
 tag `security-rt-041-042-retest-candidate` and has been merged into `develop`
 through `d542af6` so feature work can proceed from the intended defensive
-behavior. Independent verification remains pending; development builds that
-contain it are not security-certified releases and must not be promoted to
-`main` or deployed as the public release candidate yet.
+behavior. Independent verification on 2026-08-26 confirmed RT-2026-041 and
+RT-2026-042 are closed. The same run surfaced RT-2026-076, a false rejection of
+complete sibling bundles containing a proof recorded against an empty
+bootstrap plan, plus regtest transition gaps. Development builds must not be
+promoted to `main` until the follow-up candidate passes the remaining gates.
 
 This release closes two critical state-transition classes found during the
 pre-beta security review. It does not change the V2.2 consensus version or
@@ -29,6 +32,11 @@ already intended to require.
 
 This handles both event orders: share before Bitcoin notification, and Bitcoin
 notification before share.
+
+The follow-up candidate additionally preserves a notification-first block
+share when the attached node has already validated that exact block onto its
+active chain. This is not a general stale-share exception: the block hash must
+match the locally retained header, current tip, and trusted local tip.
 
 ## State-Bundle Validation
 
@@ -57,18 +65,40 @@ A future bootstrap format may restore late-join synchronization after paid
 rounds by carrying independently verifiable block/payment lineage. Until then,
 the implementation fails closed rather than trusting peer assertions.
 
+## RT-2026-076 Completeness Path
+
+Production GridPool is not expected to have an empty payout plan: mainnet
+already has a populated Winners List, and an intentional restart must seed at
+least one shared payout address. Empty-plan support is therefore an explicit
+lab compatibility path, not a mainnet bootstrap mechanism.
+
+- `allow_empty_snapshot_bootstrap` defaults to `false`.
+- It is accepted only with `bitcoin_network: regtest` in a non-production mode.
+- The context must have zero proof IDs, empty normal and fee-free Winners Lists,
+  and the canonical state ID for that zero-proof plan.
+- Arbitrary empty peer contexts remain invalid; production/mainnet nodes remain
+  fail-closed.
+
+The runtime also supports the regtest PoW limit, `bcrt1` addresses, and explicit
+RPC chain-name matching. Do not use the historical testnet4-over-regtest shim.
+
 ## Verification Gate
 
 Before promotion to `main` or deployment:
 
 1. Run the full `boot.tests` suite.
-2. Repeat RT-2026-041 against the exact release-candidate commit and verify that
+2. Preserve the completed RT-2026-041 verdict and verify on the follow-up that
    the candidate share cannot change current state, round, trusted tip, Winners
    List, or paid lineage.
-3. Repeat RT-2026-042 through both HTTP polling and persistent peer gossip and
+3. Preserve the completed RT-2026-042 verdict and verify through both HTTP
+   polling and persistent peer gossip that
    verify that every node rejects the proofless bundle without state mutation.
 4. Verify one legitimate attached-node GridPool block transition on regtest,
    including both share-first and notification-first event orderings.
 5. Verify a valid V2.2 sibling merge still succeeds with complete proofs.
+6. In the isolated regtest profile only, enable
+   `allow_empty_snapshot_bootstrap`, retain a first proof tied to the canonical
+   empty context, cross a boundary while a sibling is offline, and verify the
+   rejoining sibling converges without deleting state.
 
 Do not publish a stable tag until the independent retest passes.

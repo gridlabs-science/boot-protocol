@@ -77,6 +77,13 @@ public static class PoolConfigValidator
             errors.Add(ex.Message);
         }
 
+        if (config.AllowEmptySnapshotBootstrap &&
+            (!string.Equals(bitcoinNetwork, BitcoinScript.Regtest, StringComparison.OrdinalIgnoreCase) ||
+             IsProduction(config)))
+        {
+            errors.Add("allow_empty_snapshot_bootstrap is restricted to non-production regtest labs");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.PoolPayoutScript) &&
             !BitcoinScript.TryAddressToScriptPubKey(config.PoolPayoutScript, bitcoinNetwork, out _))
         {
@@ -161,6 +168,7 @@ public static class PoolConfigValidator
         ValidatePositive(errors, config.NetworkReadRateLimitPerMinute, "network_read_rate_limit_per_minute");
         ValidatePositive(errors, config.DashboardReadRateLimitPerMinute, "dashboard_read_rate_limit_per_minute");
         ValidatePositive(errors, config.PeerWriteRateLimitPerMinute, "peer_write_rate_limit_per_minute");
+        ValidatePositive(errors, config.PeerStateBundleFetchRateLimitPerMinute, "peer_state_bundle_fetch_rate_limit_per_minute");
         ValidatePositive(errors, config.PeerSessionTarget, "peer_session_target");
         ValidatePositive(errors, config.PeerSessionConnectIntervalSeconds, "peer_session_connect_interval_seconds");
         ValidatePositive(errors, config.PeerSessionIdleTimeoutSeconds, "peer_session_idle_timeout_seconds");
@@ -198,6 +206,12 @@ public static class PoolConfigValidator
         }
         ValidatePositive(errors, config.AdminRateLimitPerMinute, "admin_rate_limit_per_minute");
         ValidatePositive(errors, config.MaxShareRequestBytes, "max_share_request_bytes");
+        ValidatePositive(errors, config.DatumMaxConnections, "datum_max_connections");
+        ValidatePositive(errors, config.DatumReadTimeoutSeconds, "datum_read_timeout_seconds");
+        if (config.DatumMaxConnections > 1024)
+        {
+            errors.Add("datum_max_connections must be 1024 or less");
+        }
         ValidatePositive(errors, config.MaxCoinbaseHexChars, "max_coinbase_hex_chars");
         ValidatePositive(errors, config.MaxMerklePathEntries, "max_merkle_path_entries");
         ValidatePositive(errors, config.HashrateSampleIntervalSeconds, "hashrate_sample_interval_seconds");
@@ -280,6 +294,11 @@ public static class PoolConfigValidator
             {
                 errors.Add("v22_activation_block_height must be non-zero for a production mainnet V2.2 node");
             }
+        }
+
+        if (config.EnableAdminApi && !HasStrongAdminKey(config.AdminApiKey))
+        {
+            errors.Add("admin_api_key must be a strong non-placeholder value whenever enable_admin_api is true");
         }
 
         return errors;

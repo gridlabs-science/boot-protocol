@@ -7,6 +7,7 @@ namespace boot_portal.Utils;
 public static class BitcoinHashes
 {
     private static readonly BigInteger BitcoinPowLimit = DecodeCompactTarget(0x1d00ffff);
+    private static readonly BigInteger RegtestPowLimit = DecodeCompactTarget(0x207fffff);
     public static string NormalizeHex(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex))
@@ -120,7 +121,10 @@ public static class BitcoinHashes
         return ToDisplayHashHex(second);
     }
 
-    public static BitcoinHeaderEvaluation EvaluateHeader(string? headerHex, DateTime receivedUtc)
+    public static BitcoinHeaderEvaluation EvaluateHeader(
+        string? headerHex,
+        DateTime receivedUtc,
+        string? bitcoinNetwork = BitcoinScript.Mainnet)
     {
         try
         {
@@ -138,7 +142,10 @@ public static class BitcoinHashes
             uint timestamp = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(68, 4));
             uint compactTarget = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(72, 4));
             BigInteger target = DecodeCompactTarget(compactTarget);
-            if (target <= BigInteger.Zero || target > BitcoinPowLimit)
+            BigInteger proofOfWorkLimit = BitcoinScript.NormalizeNetwork(bitcoinNetwork) == BitcoinScript.Regtest
+                ? RegtestPowLimit
+                : BitcoinPowLimit;
+            if (target <= BigInteger.Zero || target > proofOfWorkLimit)
             {
                 return BitcoinHeaderEvaluation.Invalid("Header target is outside the Bitcoin proof-of-work limit.");
             }
@@ -160,7 +167,7 @@ public static class BitcoinHashes
                 ReceivedUtc = receivedUtc
             };
         }
-        catch (Exception ex) when (ex is ArgumentException or FormatException or ArgumentOutOfRangeException)
+        catch (Exception ex) when (ex is ArgumentException or FormatException or ArgumentOutOfRangeException or InvalidOperationException)
         {
             return BitcoinHeaderEvaluation.Invalid(ex.Message);
         }
