@@ -1,22 +1,15 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Net.Sockets;
-using System.Text;
-using System.Collections.Concurrent;
 using boot_portal.Models;
 
 namespace boot_portal.Services;
 
 public sealed class BootPeerUdpRelayService : BackgroundService
 {
-    private const string ReachabilityProbePrefix = "GP_REACHABILITY_PROBE:";
-    private const string ReachabilityAckPrefix = "GP_REACHABILITY_ACK:";
-    private static readonly TimeSpan ReachabilityChallengeTtl = TimeSpan.FromMinutes(2);
     private readonly PoolConfig _poolConfig;
     private readonly BootProtocolStateService _stateService;
     private readonly BootPeerSessionManager _sessionManager;
     private readonly ILogger<BootPeerUdpRelayService> _logger;
-    private readonly ConcurrentDictionary<string, BootUdpReachabilityChallenge> _reachabilityChallenges = new(StringComparer.Ordinal);
     private UdpClient? _udpClient;
 
     public BootPeerUdpRelayService(
@@ -193,96 +186,6 @@ public sealed class BootPeerUdpRelayService : BackgroundService
             target.Datagram.Length);
     }
 
-    public async Task<bool> SendReachabilityProbeAsync(
-        string host,
-        int port,
-        string nonce,
-        string ackUrl,
-        string targetBaseUrl,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(host) ||
-            port is <= 0 or > 65535 ||
-            string.IsNullOrWhiteSpace(nonce))
-        {
-            return false;
-        }
-
-        try
-        {
-            IPAddress[] addresses = await Dns.GetHostAddressesAsync(host, cancellationToken);
-            IPAddress? address = addresses.FirstOrDefault(candidate => candidate.AddressFamily == AddressFamily.InterNetwork);
-            if (address == null)
-            {
-                return false;
-            }
-
-            string payloadText = $"{ReachabilityProbePrefix}{nonce}|{ackUrl}|{targetBaseUrl}";
-            byte[] payload = Encoding.ASCII.GetBytes(payloadText);
-            using var udp = new UdpClient(AddressFamily.InterNetwork);
-            await udp.SendAsync(payload, payload.Length, new IPEndPoint(address, port));
-            return true;
-        }
-        catch (Exception ex) when (ex is SocketException or ObjectDisposedException or ArgumentException or InvalidOperationException)
-        {
-            _logger.LogDebug(ex, "Failed to send UDP reachability probe to {Host}:{Port}.", host, port);
-            return false;
-        }
-    }
-
-    public void RegisterReachabilityChallenge(string nonce, string targetBaseUrl)
-    {
-        if (string.IsNullOrWhiteSpace(nonce))
-        {
-            return;
-        }
-
-        PruneReachabilityChallenges();
-        _reachabilityChallenges[nonce.Trim()] = new BootUdpReachabilityChallenge
-        {
-            Nonce = nonce.Trim(),
-            TargetBaseUrl = targetBaseUrl.Trim(),
-            CreatedAtUtc = DateTime.UtcNow
-        };
-    }
-
-    public bool AcknowledgeReachabilityChallenge(string nonce, string targetBaseUrl)
-    {
-        if (string.IsNullOrWhiteSpace(nonce))
-        {
-            return false;
-        }
-
-        PruneReachabilityChallenges();
-        string key = nonce.Trim();
-        if (!_reachabilityChallenges.TryGetValue(key, out BootUdpReachabilityChallenge? challenge))
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(challenge.TargetBaseUrl) &&
-            !string.IsNullOrWhiteSpace(targetBaseUrl) &&
-            !string.Equals(challenge.TargetBaseUrl.Trim().TrimEnd('/'), targetBaseUrl.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        challenge.AcknowledgedAtUtc = DateTime.UtcNow;
-        return true;
-    }
-
-    public bool WasReachabilityChallengeAcknowledged(string nonce)
-    {
-        if (string.IsNullOrWhiteSpace(nonce))
-        {
-            return false;
-        }
-
-        PruneReachabilityChallenges();
-        return _reachabilityChallenges.TryGetValue(nonce.Trim(), out BootUdpReachabilityChallenge? challenge) &&
-            challenge.AcknowledgedAtUtc.HasValue;
-    }
-
     private async Task HandleDatagramAsync(
         byte[] datagram,
         IPEndPoint remoteEndPoint,
@@ -295,11 +198,6 @@ public sealed class BootPeerUdpRelayService : BackgroundService
                 "Rejected oversized V3 UDP datagram from {RemoteEndPoint}: {Bytes} bytes.",
                 remoteEndPoint,
                 datagram.Length);
-            return;
-        }
-
-        if (TryHandleReachabilityProbe(datagram, remoteEndPoint))
-        {
             return;
         }
 
@@ -365,105 +263,10 @@ public sealed class BootPeerUdpRelayService : BackgroundService
         _stateService.UpdatePeerUdpHeartbeat(received.RemoteEndpoint, received.RemoteNodeId, "udp-invalid", success: false, DateTime.UtcNow);
     }
 
-    private bool TryHandleReachabilityProbe(byte[] datagram, IPEndPoint remoteEndPoint)
-    {
-        string text;
-        try
-        {
-            text = Encoding.ASCII.GetString(datagram);
-        }
-        catch
-        {
-            return false;
-        }
-
-        if (!text.StartsWith(ReachabilityProbePrefix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        string payload = text[ReachabilityProbePrefix.Length..].Trim();
-        string[] parts = payload.Split('|', 3);
-        string nonce = parts.ElementAtOrDefault(0)?.Trim() ?? string.Empty;
-        string ackUrl = parts.ElementAtOrDefault(1)?.Trim() ?? string.Empty;
-        string targetBaseUrl = parts.ElementAtOrDefault(2)?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(nonce))
-        {
-            return true;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                byte[] ack = Encoding.ASCII.GetBytes($"{ReachabilityAckPrefix}{nonce}");
-                using var udp = new UdpClient(AddressFamily.InterNetwork);
-                await udp.SendAsync(ack, ack.Length, remoteEndPoint);
-                await PostReachabilityAckAsync(ackUrl, nonce, targetBaseUrl);
-            }
-            catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
-            {
-                _logger.LogDebug(ex, "Failed to send UDP reachability ack to {RemoteEndPoint}.", remoteEndPoint);
-            }
-        });
-
-        _stateService.RecordExternalNetworkEvent(
-            "udp-reachability-probe",
-            remoteEndPoint.ToString(),
-            "Received UDP reachability probe and attempted ack.");
-        return true;
-    }
-
-    private async Task PostReachabilityAckAsync(string ackUrl, string nonce, string targetBaseUrl)
-    {
-        if (string.IsNullOrWhiteSpace(ackUrl) ||
-            !Uri.TryCreate(ackUrl, UriKind.Absolute, out Uri? uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            return;
-        }
-
-        try
-        {
-            using var client = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(2)
-            };
-            using var response = await client.PostAsJsonAsync(uri, new BootUdpReachabilityAckRequest
-            {
-                Nonce = nonce,
-                TargetBaseUrl = targetBaseUrl
-            });
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
-        {
-            _logger.LogDebug(ex, "Failed to POST UDP reachability ack to {AckUrl}.", ackUrl);
-        }
-    }
-
-    private void PruneReachabilityChallenges()
-    {
-        DateTime cutoff = DateTime.UtcNow - ReachabilityChallengeTtl;
-        foreach (var item in _reachabilityChallenges)
-        {
-            if (item.Value.CreatedAtUtc < cutoff)
-            {
-                _reachabilityChallenges.TryRemove(item.Key, out _);
-            }
-        }
-    }
-
     public override void Dispose()
     {
         _udpClient?.Dispose();
         base.Dispose();
     }
 
-    private sealed class BootUdpReachabilityChallenge
-    {
-        public string Nonce { get; init; } = string.Empty;
-        public string TargetBaseUrl { get; init; } = string.Empty;
-        public DateTime CreatedAtUtc { get; init; }
-        public DateTime? AcknowledgedAtUtc { get; set; }
-    }
 }

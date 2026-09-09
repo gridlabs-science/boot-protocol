@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,12 +14,15 @@
     <PackageReference Include="NetMQ" Version="4.0.2.2" />
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.18" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Remove="publish/**;**/pool_state*.json;boot_portal_config.json;boot_portal_config.local.json" Watch="false" />
     <None Remove="publish/**;**/pool_state*.json;boot_portal_config.json;boot_portal_config.local.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="boot.tests" />
   </ItemGroup>
 
 </Project>

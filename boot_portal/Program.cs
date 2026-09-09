@@ -15,6 +15,7 @@ using boot_portal.Models;
 using boot_portal.HostedServices;
 using boot_portal.Services;
 using boot_portal.Utils;
+using boot_portal.Controllers;
 using Microsoft.AspNetCore.RateLimiting;
 using NSec.Cryptography;
 using Microsoft.AspNetCore.SignalR;
@@ -350,6 +351,14 @@ public class Program
             {
                 client.Timeout = TimeSpan.FromSeconds(Math.Max(2, _poolConfig.PeerRequestTimeoutSeconds));
             });
+            builder.Services.AddHttpClient("ReachabilityProbeClient", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(Math.Max(2, _poolConfig.PeerRequestTimeoutSeconds));
+            }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                ConnectCallback = BootNetworkController.ConnectToPublicHostAsync
+            });
             builder.Services.AddHttpClient<BitcoinRpcClient>(client =>
             {
                 client.Timeout = TimeSpan.FromSeconds(Math.Max(1, _poolConfig.BitcoinRpcTimeoutSeconds));
@@ -466,6 +475,18 @@ public class Program
                     context.Response.StatusCode = StatusCodes.Status404NotFound;
                     return;
                 }
+                context.Response.OnStarting(() =>
+                {
+                    context.Response.Headers["Content-Security-Policy"] =
+                        "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; " +
+                        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; " +
+                        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+                        "font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; " +
+                        "connect-src 'self' ws: wss: https://mempool.space";
+                    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+                    return Task.CompletedTask;
+                });
 
                 if (IsPeerOnlyListenerRequest(context, _poolConfig) &&
                     !IsAllowedPeerOnlyPath(context.Request.Path))
@@ -868,11 +889,17 @@ public class ClientHandler
         _x25519KeyLongTerm = serverLongTermXKey;
         _poolConfig = poolConfig;
         _stateService = stateService;
-        _clientPayoutAddress = BootProtocolStateService.GetGenesisFoundationAddress(_poolConfig.BitcoinNetwork);
+        _clientPayoutAddress = BitcoinScript.NormalizeAddress(_poolConfig.PoolPayoutScript);
+        _sessionPayoutAddressLocked = IsValidAddress(_clientPayoutAddress);
         _stoppingToken = st;
         _sessionStartedUtc = DateTime.UtcNow;
         _sessionId = $"datum-{Interlocked.Increment(ref _nextSessionId)}";
         _stateService.RecordDatumSessionOpened(_sessionId, RemoteEndpointLabel, _sessionStartedUtc);
+        if (_sessionPayoutAddressLocked)
+        {
+            RememberClientPayoutAddress(_clientPayoutAddress);
+            _stateService.RecordDatumSessionPayoutLock(_sessionId, _clientPayoutAddress);
+        }
         RecordDatumProtocolEvent(new BootDatumProtocolEvent
         {
             Direction = "internal",
@@ -995,10 +1022,12 @@ public class ClientHandler
 
     private async Task<int> ReadExactOrUntilClosedAsync(byte[] buffer, int length)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _poolConfig.DatumReadTimeoutSeconds)));
         int offset = 0;
         while (offset < length)
         {
-            int read = await _stream.ReadAsync(buffer, offset, length - offset);
+            int read = await _stream.ReadAsync(buffer.AsMemory(offset, length - offset), timeout.Token);
             if (read == 0)
             {
                 break;
@@ -1130,6 +1159,15 @@ public class ClientHandler
                 //Console.WriteLine($"📋 Parsed header: Cmd={header.ProtoCmd}, Len={header.CmdLen}, Signed={header.IsSigned}, EncryptedPubKey={header.IsEncryptedPubKey}, EncryptedChannel={header.IsEncryptedChannel}");
 
                 // Step 2: Read in the message body
+                if (header.CmdLen > _poolConfig.MaxShareRequestBytes)
+                {
+                    MarkSessionClose(
+                        "message-too-large",
+                        $"DATUM message declared {header.CmdLen} bytes; maximum is {_poolConfig.MaxShareRequestBytes}.");
+                    ScheduleServerInitiatedClose(
+                        $"Closing DATUM session {RemoteEndpointLabel} after an oversized message header.");
+                    break;
+                }
                 var bodyBuffer = new byte[header.CmdLen];
                 bytesRead = await ReadExactOrUntilClosedAsync(bodyBuffer, bodyBuffer.Length);
                 if (bytesRead == 0)
@@ -1365,6 +1403,11 @@ public class ClientHandler
                 }
                 //Finally back to the top of the loop and await the next incoming message
             }
+        }
+        catch (OperationCanceledException) when (!_stoppingToken.IsCancellationRequested)
+        {
+            MarkSessionClose("read-timeout", "DATUM header or body was not received before the read deadline.");
+            ScheduleServerInitiatedClose($"Closing DATUM session {RemoteEndpointLabel} after a read timeout.");
         }
         catch (IOException ex)
         {
@@ -2083,6 +2126,16 @@ public class ClientHandler
         {
             fetchRequest = CoinbaserFetchMessage.FromBytes(payload);
             parseDurationMs = stageStopwatch.Elapsed.TotalMilliseconds;
+
+            if (!_sessionPayoutAddressLocked || string.IsNullOrWhiteSpace(_clientPayoutAddress))
+            {
+                MarkSessionClose(
+                    "payout-address-required",
+                    "DATUM coinbase work is unavailable until the miner locks a valid payout address.");
+                ScheduleServerInitiatedClose(
+                    $"Closing DATUM session {RemoteEndpointLabel} because no valid slot-0 payout address is locked.");
+                return;
+            }
 
             stageStopwatch.Restart();
             DatumCoinbaseTemplate coinbaseTemplate = _stateService.GetDatumCoinbaseTemplate();

@@ -2,7 +2,7 @@ using boot_portal.Services;
 using boot_portal.Models;
 using System.Diagnostics;
 using System.Net;
-using System.Security.Cryptography;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using boot_portal.Utils;
@@ -88,14 +88,19 @@ public class BootNetworkController : ControllerBase
             return BadRequest(new { status = "rejected", reason = rejectionReason });
         }
 
+        if (!await IsPublicReachabilityTargetAsync(targetBaseUri, cancellationToken))
+        {
+            return BadRequest(new { status = "rejected", reason = "targetBaseUrl must resolve only to public unicast addresses" });
+        }
+
         var result = new BootReachabilityProbeResult
         {
             TargetBaseUrl = targetBaseUri.ToString().TrimEnd('/'),
             TestedAtUtc = DateTime.UtcNow,
-            ObservedRequesterIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty
+            ObservedRequesterIp = string.Empty
         };
 
-        using HttpClient client = _httpClientFactory.CreateClient("BootPeerClient");
+        using HttpClient client = _httpClientFactory.CreateClient("ReachabilityProbeClient");
         await ProbeHttpAsync(client, new Uri(targetBaseUri, "/health"), cancellationToken, (status, latency, warning) =>
         {
             result.HttpStatusCode = status;
@@ -132,37 +137,8 @@ public class BootNetworkController : ControllerBase
         if (request.IncludeUdpProbe && request.UdpPort is > 0 and <= 65535)
         {
             result.UdpProbeAttempted = true;
-            result.UdpHost = string.IsNullOrWhiteSpace(request.UdpHost)
-                ? targetBaseUri.Host
-                : request.UdpHost.Trim();
             result.UdpPort = request.UdpPort.Value;
-            string nonce = string.IsNullOrWhiteSpace(request.UdpChallengeNonce)
-                ? Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant()
-                : request.UdpChallengeNonce.Trim();
-            result.UdpChallengeNonce = nonce;
-            _udpRelayService.RegisterReachabilityChallenge(nonce, result.TargetBaseUrl);
-            string ackUrl = $"{Request.Scheme}://{Request.Host}/api/network/reachability-ack";
-            result.UdpProbeSent = await _udpRelayService.SendReachabilityProbeAsync(
-                result.UdpHost,
-                request.UdpPort.Value,
-                nonce,
-                ackUrl,
-                result.TargetBaseUrl,
-                cancellationToken);
-            if (result.UdpProbeSent)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
-                result.UdpChallengeAcknowledged = _udpRelayService.WasReachabilityChallengeAcknowledged(nonce);
-            }
-
-            if (!result.UdpProbeSent)
-            {
-                result.Warnings.Add("UDP probe could not be sent. This does not prove the UDP relay is unreachable.");
-            }
-            else if (!result.UdpChallengeAcknowledged)
-            {
-                result.Warnings.Add("UDP probe was sent, but no challenge ack was observed before the short timeout.");
-            }
+            result.Warnings.Add("Plaintext UDP reachability probes are disabled; use authenticated peer-session telemetry.");
         }
 
         result.Summary = BuildReachabilitySummary(result);
@@ -178,15 +154,7 @@ public class BootNetworkController : ControllerBase
     [HttpPost("reachability-ack")]
     public IActionResult AckReachabilityProbe([FromBody] BootUdpReachabilityAckRequest? request)
     {
-        if (request == null || string.IsNullOrWhiteSpace(request.Nonce))
-        {
-            return BadRequest(new { status = "rejected", reason = "nonce is required" });
-        }
-
-        bool accepted = _udpRelayService.AcknowledgeReachabilityChallenge(
-            request.Nonce,
-            request.TargetBaseUrl);
-        return Ok(new { status = accepted ? "accepted" : "unknown", accepted });
+        return NotFound();
     }
 
     [EnableRateLimiting("admin-write")]
@@ -234,6 +202,79 @@ public class BootNetworkController : ControllerBase
 
         normalized = new UriBuilder(uri.Scheme, uri.Host, uri.IsDefaultPort ? -1 : uri.Port).Uri;
         return true;
+    }
+
+    internal static async Task<bool> IsPublicReachabilityTargetAsync(Uri target, CancellationToken cancellationToken)
+    {
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(target.Host, cancellationToken);
+        }
+        catch (Exception ex) when (ex is SocketException or OperationCanceledException or ArgumentException)
+        {
+            return false;
+        }
+
+        return addresses.Length > 0 && addresses.All(address => !IsNonPublicAddress(address));
+    }
+
+    internal static bool IsNonPublicAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any))
+        {
+            return true;
+        }
+
+        byte[] bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return bytes[0] == 0 || bytes[0] == 10 || bytes[0] == 127 || bytes[0] >= 224 ||
+                   (bytes[0] == 100 && bytes[1] is >= 64 and <= 127) ||
+                   (bytes[0] == 169 && bytes[1] == 254) ||
+                   (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+                   (bytes[0] == 192 && bytes[1] == 168);
+        }
+
+        return address.IsIPv6LinkLocal || address.IsIPv6Multicast || address.IsIPv6SiteLocal ||
+               (bytes.Length == 16 && (bytes[0] & 0xfe) == 0xfc);
+    }
+
+    internal static async ValueTask<Stream> ConnectToPublicHostAsync(
+        SocketsHttpConnectionContext context,
+        CancellationToken cancellationToken)
+    {
+        IPAddress[] addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken);
+        IPAddress[] publicAddresses = addresses.Where(address => !IsNonPublicAddress(address)).ToArray();
+        if (publicAddresses.Length == 0 || publicAddresses.Length != addresses.Length)
+        {
+            throw new HttpRequestException("Reachability target resolved to a non-public address.");
+        }
+
+        Exception? lastError = null;
+        foreach (IPAddress address in publicAddresses)
+        {
+            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                await socket.ConnectAsync(
+                    new IPEndPoint(address, context.DnsEndPoint.Port),
+                    cancellationToken);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+            {
+                socket.Dispose();
+                lastError = ex;
+            }
+        }
+
+        throw new HttpRequestException("Reachability target connection failed.", lastError);
     }
 
     private static async Task ProbeHttpAsync(

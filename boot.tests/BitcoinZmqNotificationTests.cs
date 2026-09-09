@@ -128,7 +128,7 @@ public sealed class BitcoinZmqNotificationTests
             BitcoinRpcUrl = "http://bitcoin:8332",
             BitcoinRpcLagGraceSeconds = 1
         });
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = DateTime.UtcNow.AddSeconds(2);
         health.RecordRpcFailure(
             "failed http://alice:secret@bitcoin:8332/wallet/private?token=secret",
             nowUtc.AddSeconds(-2));
@@ -187,5 +187,23 @@ public sealed class BitcoinZmqNotificationTests
 
         Assert.AreNotEqual(7L, first);
         Assert.AreEqual(first, second);
+    }
+
+    [TestMethod]
+    public void RepeatedRpcFailuresCannotRenewMiningSafetyGracePeriod()
+    {
+        var health = new BitcoinNotificationHealth(new PoolConfig
+        {
+            BitcoinNotificationMode = BitcoinNotificationModes.AttachedNode,
+            BitcoinRpcUrl = "http://bitcoin:8332",
+            BitcoinRpcLagGraceSeconds = 1
+        });
+        DateTime afterGrace = DateTime.UtcNow.AddSeconds(2);
+
+        health.RecordRpcFailure("warmup", afterGrace.AddMilliseconds(-500));
+        health.RecordRpcFailure("still warming up", afterGrace);
+
+        Assert.IsFalse(health.IsMiningSafe(afterGrace, out string reason));
+        StringAssert.Contains(reason, "unreachable");
     }
 }

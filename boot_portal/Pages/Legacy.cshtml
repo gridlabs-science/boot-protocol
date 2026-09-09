@@ -2202,9 +2202,9 @@
         const submittedBase = getBaseMinerAddress(submitted);
         const credited = getAttributionAddress(item);
         if (submitted && submittedBase && credited && normalizeSearchValue(submittedBase) !== normalizeSearchValue(credited)) {
-            return `Credited to ${label}; submitted username ${submitted}`;
+            return escapeHtml(`Credited to ${label}; submitted username ${submitted}`);
         }
-        return label;
+        return escapeHtml(label);
     }
 
     function minerMatchesSearch(item, term = currentSearchValue()) {
@@ -3449,7 +3449,7 @@
         if (kind === "manual-reset") return "manual";
         if (kind.startsWith("adopted-state:")) return "adopted";
         if (kind.startsWith("bootstrap-state:")) return "bootstrap";
-        return kind.replace(/[:_]/g, " ");
+        return String(kind).replace(/[^A-Za-z0-9 :_.-]/g, "_").replace(/[:_]/g, " ");
     }
 
     function roundHistoryDisplayOrder(history) {
@@ -4051,7 +4051,7 @@
         if (!recipients || recipients.length === 0) return "No payouts";
         return recipients.slice(0, 3).map(entry => {
             const label = formatAttributionLabel(entry);
-            return `${label} ${formatPercent(entry.totalValue, totalValue)}`;
+            return `${escapeHtml(label)} ${escapeHtml(formatPercent(entry.totalValue, totalValue))}`;
         }).join(" · ");
     }
 
@@ -4264,7 +4264,7 @@
 
             return recipients.map(item => `
                 <tr class="${recipientMatchesSearch(item) ? 'highlight-row' : ''}">
-                    <td class="${isLottery || isBusiness ? 'full-label' : 'compact-label'}" title="${attributionTitle(item)}">${formatAttributionLabel(item, isLottery || isBusiness)}</td>
+                    <td class="${isLottery || isBusiness ? 'full-label' : 'compact-label'}" title="${attributionTitle(item)}">${escapeHtml(formatAttributionLabel(item, isLottery || isBusiness))}</td>
                     <td>${item.slotCount}</td>
                     <td>${formatBtcFromSats(item.totalValue)}</td>
                     <td>${formatPercent(item.totalValue, totalValue)}</td>
@@ -4693,7 +4693,7 @@
 
             const btcValue = payout.value / 100000000.0;
             const useFullLabel = listViewModes[tableId] === 'full';
-            const formattedAddr = formatAttributionLabel(payout, useFullLabel);
+            const formattedAddr = escapeHtml(formatAttributionLabel(payout, useFullLabel));
             const diffVal = payout.difficulty || 0;
             const diffDisplay = payout.diffString || diffVal.toLocaleString(undefined, {maximumFractionDigits: 2});
 

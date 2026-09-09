@@ -194,6 +194,9 @@ public class PoolConfig
     [JsonPropertyName("peer_write_rate_limit_per_minute")]
     public int PeerWriteRateLimitPerMinute { get; set; } = 3000;
 
+    [JsonPropertyName("peer_state_bundle_fetch_rate_limit_per_minute")]
+    public int PeerStateBundleFetchRateLimitPerMinute { get; set; } = 12;
+
     [JsonPropertyName("enable_peer_persistent_sessions")]
     public bool EnablePeerPersistentSessions { get; set; } = true;
 
@@ -315,6 +318,12 @@ public class PoolConfig
 
     [JsonPropertyName("max_share_request_bytes")]
     public int MaxShareRequestBytes { get; set; } = 262144;
+
+    [JsonPropertyName("datum_max_connections")]
+    public int DatumMaxConnections { get; set; } = 32;
+
+    [JsonPropertyName("datum_read_timeout_seconds")]
+    public int DatumReadTimeoutSeconds { get; set; } = 15;
 
     [JsonPropertyName("max_coinbase_hex_chars")]
     public int MaxCoinbaseHexChars { get; set; } = 100000;

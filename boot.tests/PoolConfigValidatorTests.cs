@@ -7,13 +7,20 @@ namespace boot.tests;
 [TestClass]
 public sealed class PoolConfigValidatorTests
 {
+    private const string MainnetPayoutAddress = "bc1qd9m04z95mglaxd9e9accmhyjdlmkfmzjprkq4p";
+
     [TestMethod]
-    public void DefaultCoinbaseTagIsGridPool()
+    public void SetupUiMayStartWithoutPayoutButHeadlessModeCannot()
     {
         var config = new PoolConfig();
 
         Assert.AreEqual("Grid Pool", config.CoinbaseTag);
-        CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
+        Assert.IsFalse(PoolConfigValidator.Validate(config).Any(error =>
+            error.Contains("pool_payout_script", StringComparison.OrdinalIgnoreCase)));
+
+        config.EnableWebUi = false;
+        Assert.IsTrue(PoolConfigValidator.Validate(config).Any(error =>
+            error.Contains("pool_payout_script", StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]
@@ -130,7 +137,9 @@ public sealed class PoolConfigValidatorTests
     {
         var config = new PoolConfig
         {
-            CoinbaseTag = string.Empty
+            CoinbaseTag = string.Empty,
+            PoolPayoutScript = MainnetPayoutAddress,
+            EnableAdminApi = false
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
@@ -207,6 +216,7 @@ public sealed class PoolConfigValidatorTests
         {
             BitcoinNetwork = BitcoinScript.Testnet4,
             PoolPayoutScript = testnetAddress,
+            EnableAdminApi = false
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(validConfig));
@@ -240,7 +250,8 @@ public sealed class PoolConfigValidatorTests
         var config = new PoolConfig
         {
             BitcoinNetwork = BitcoinScript.Regtest,
-            PoolPayoutScript = regtestAddress
+            PoolPayoutScript = regtestAddress,
+            EnableAdminApi = false
         };
 
         Assert.IsTrue(regtestAddress.StartsWith("bcrt1", StringComparison.OrdinalIgnoreCase));
@@ -301,7 +312,9 @@ public sealed class PoolConfigValidatorTests
         {
             NodeMode = "sovereign",
             PublicBaseUrl = "http://edge-node.local:5000",
-            DatumPublicHost = "edge-node.local"
+            DatumPublicHost = "edge-node.local",
+            PoolPayoutScript = MainnetPayoutAddress,
+            EnableAdminApi = false
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
@@ -352,7 +365,8 @@ public sealed class PoolConfigValidatorTests
             PublicBaseUrl = "https://use1.gridlabs.science",
             DatumPublicHost = "datum-use1.gridlabs.science",
             EnableAdminApi = false,
-            TestingRoundResetMode = "none"
+            TestingRoundResetMode = "none",
+            PoolPayoutScript = MainnetPayoutAddress
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));
@@ -386,7 +400,8 @@ public sealed class PoolConfigValidatorTests
             DatumPublicHost = "datum-use1.gridlabs.science",
             EnableAdminApi = true,
             AdminApiKey = new string('a', 32),
-            TestingRoundResetMode = "none"
+            TestingRoundResetMode = "none",
+            PoolPayoutScript = MainnetPayoutAddress
         };
 
         CollectionAssert.AreEqual(Array.Empty<string>(), PoolConfigValidator.Validate(config));

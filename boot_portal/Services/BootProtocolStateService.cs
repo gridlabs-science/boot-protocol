@@ -88,7 +88,7 @@ public class BootProtocolStateService
     private const double SlowStateLockWaitWarningMs = 250;
     private const double SlowStateSaveWarningMs = 250;
     private const int MaxSeenShareIds = 20000;
-    private const int MaxAcceptedParentBlockHashes = 100000;
+    private const int MaxAcceptedParentBlockHashes = 128;
     private const int MaxRecentRejectedShareDiagnostics = 1000;
     private const int MaxRecentCoinbaserDiagnostics = 1000;
     private const int MaxRecentDatumShareResponses = 2000;
@@ -2075,18 +2075,16 @@ public class BootProtocolStateService
                         $"Fresh-parent retry validated but computed difficulty {freshParentValidation.Difficulty.ToString("F2", CultureInfo.InvariantCulture)} was below the floor.");
                     validation = freshParentValidation;
                 }
-                else if (TryLearnFreshParentFromTrustedShare(share.Source, freshParentValidation, currentStateSnapshot))
-                {
-                    validation = freshParentValidation;
-                    matchedSnapshotId = freshParentSnapshotValidation.SnapshotId;
-                }
                 else
                 {
                     RecordFreshParentRetryEvent(
-                        "fresh-parent-learn-failed",
+                        "fresh-parent-rejected",
                         share.Source,
                         freshParentValidation.PrevBlockHash,
-                        "Fresh-parent retry validated, but the parent could not be learned before the state changed.");
+                        "A mining share cannot establish a new Bitcoin parent; local Bitcoin notification authority must validate the tip first.");
+                    validation = RejectValidatedShare(
+                        freshParentValidation,
+                        "Fresh proof parent is outside the active Bitcoin tip; the attached Bitcoin source must validate it before direct ingress.");
                 }
             }
         }
@@ -2126,11 +2124,11 @@ public class BootProtocolStateService
             }
             else if (validation.IsValid &&
                      !locallyConfirmedCurrentBlockShare &&
-                     IsNewDirectIngressPreviousParentProofNoLock(validation.ShareId, validation.PrevBlockHash))
+                     IsNewDirectIngressOutsideActiveParentNoLock(validation.ShareId, validation.PrevBlockHash))
             {
                 validation = RejectValidatedShare(
                     validation,
-                    "New previous-parent proof rejected after the local snapshot boundary.");
+                    "Fresh proof parent is outside the active Bitcoin tip; retained proofs may be revalidated only through state reconciliation.");
             }
         }
         shareCoreValidationDurationMs = stageStopwatch.Elapsed.TotalMilliseconds;
@@ -2276,11 +2274,6 @@ public class BootProtocolStateService
                 OnDeckList = GetOnDeckList(),
                 NetworkStatus = networkStatus
             });
-        }
-
-        if (IsTrustedFreshParentSource(share.Source))
-        {
-            TryLearnFreshParentFromTrustedShare(share.Source, validation, currentStateSnapshot);
         }
 
         ShareRecordingResult result;
@@ -3182,12 +3175,6 @@ public class BootProtocolStateService
             variants.Add(ClonePayouts(context.WinnersList));
         }
 
-        if (context.FeeFreeWinnersList.Count > 0 &&
-            !variants.Any(existing => WinnersMatch(existing, context.FeeFreeWinnersList)))
-        {
-            variants.Add(ClonePayouts(context.FeeFreeWinnersList));
-        }
-
         return variants;
     }
 
@@ -3973,7 +3960,8 @@ public class BootProtocolStateService
                 }
             }
 
-            if (IsStaleTipObservationNoLock(
+            bool trustedReorganization = source.Contains("reorg", StringComparison.OrdinalIgnoreCase);
+            if (!trustedReorganization && IsStaleTipObservationNoLock(
                 normalizedBlockHash,
                 effectiveBlockHeight,
                 _state.CurrentTipBlockHash,
@@ -3992,7 +3980,7 @@ public class BootProtocolStateService
 
             bool oneBlockReorg = GetActiveConsensusVersionNoLock() >= BootProtocolVersions.ConsensusVersion &&
                 effectiveBlockHeight.HasValue &&
-                _state.CurrentTipBlockHeight == effectiveBlockHeight &&
+                (_state.CurrentTipBlockHeight == effectiveBlockHeight || trustedReorganization) &&
                 !BitcoinHashes.AreEquivalent(normalizedBlockHash, _state.CurrentTipBlockHash);
             if (oneBlockReorg)
             {
@@ -5924,24 +5912,22 @@ public class BootProtocolStateService
         };
     }
 
-    private bool IsNewDirectIngressPreviousParentProofNoLock(string? shareId, string? parentBlockHash)
+    private bool IsNewDirectIngressOutsideActiveParentNoLock(string? shareId, string? parentBlockHash)
     {
         if (string.IsNullOrWhiteSpace(parentBlockHash))
         {
             return false;
         }
 
-        BootPayoutSnapshotContext? active = GetSnapshotContextNoLock(_state.ActiveSnapshotId);
-        BootPayoutSnapshotContext? predecessor = GetSnapshotContextNoLock(active?.PreviousSnapshotId);
-        string? finalizedPreviousParent = NormalizeCanonicalBlockHash(predecessor?.LockedByBlockHash);
-        if (string.IsNullOrWhiteSpace(finalizedPreviousParent) ||
-            !BitcoinHashes.AreEquivalent(parentBlockHash, finalizedPreviousParent))
+        if (_state.OnDeckProofs.Any(proof =>
+                string.Equals(proof.ShareId, shareId, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
 
-        return !_state.OnDeckProofs.Any(proof =>
-            string.Equals(proof.ShareId, shareId, StringComparison.OrdinalIgnoreCase));
+        string? currentTip = NormalizeCanonicalBlockHash(_state.CurrentTipBlockHash);
+        return !string.IsNullOrWhiteSpace(currentTip) &&
+               !BitcoinHashes.AreEquivalent(parentBlockHash, currentTip);
     }
 
     private bool IsLocallyConfirmedCurrentBlockShareNoLock(BootShareHeaderEvaluationResult headerEvaluation)
@@ -5966,19 +5952,25 @@ public class BootProtocolStateService
         string replacementBlockHash,
         long replacementBlockHeight)
     {
-        BootSnapshotFamilyState? removedFamily = GetActiveSnapshotFamilyNoLock();
-        if (removedFamily == null ||
-            removedFamily.BoundaryBlockHeight != replacementBlockHeight ||
-            BitcoinHashes.AreEquivalent(removedFamily.BoundaryBlockHash, replacementBlockHash))
+        while (true)
         {
-            return;
-        }
+            BootSnapshotFamilyState? removedFamily = GetActiveSnapshotFamilyNoLock();
+            if (removedFamily == null ||
+                removedFamily.BoundaryBlockHeight < replacementBlockHeight ||
+                (removedFamily.BoundaryBlockHeight == replacementBlockHeight &&
+                 BitcoinHashes.AreEquivalent(removedFamily.BoundaryBlockHash, replacementBlockHash)))
+            {
+                return;
+            }
 
-        removedFamily.IsOpen = false;
-        removedFamily.BoundaryOnActiveChain = false;
-        BootPayoutSnapshotContext? predecessor = GetSnapshotContextNoLock(removedFamily.PredecessorSnapshotId);
-        if (predecessor != null)
-        {
+            removedFamily.IsOpen = false;
+            removedFamily.BoundaryOnActiveChain = false;
+            BootPayoutSnapshotContext? predecessor = GetSnapshotContextNoLock(removedFamily.PredecessorSnapshotId);
+            if (predecessor == null)
+            {
+                return;
+            }
+
             _state.ActiveSnapshotId = predecessor.SnapshotId;
             _state.ActiveSnapshotProofIds = predecessor.ProofIds.ToList();
             _state.WinnersList = ClonePayouts(predecessor.WinnersList);
@@ -5987,14 +5979,14 @@ public class BootProtocolStateService
             _state.CurrentRoundNumber = Math.Max(0, predecessor.CurrentRoundNumber);
             _state.CurrentTipBlockHash = NormalizeCanonicalBlockHash(predecessor.LockedByBlockHash);
             _state.CurrentTipBlockHeight = predecessor.LockedByBlockHeight;
-        }
 
-        RecordNetworkEventNoLock(
-            "snapshot-family-reorg",
-            source,
-            $"Deactivated snapshot family {removedFamily.FamilyId} after boundary {removedFamily.BoundaryBlockHash} left the active chain.",
-            replacementBlockHash,
-            replacementBlockHeight);
+            RecordNetworkEventNoLock(
+                "snapshot-family-reorg",
+                source,
+                $"Deactivated snapshot family {removedFamily.FamilyId} after boundary {removedFamily.BoundaryBlockHash} left the active chain.",
+                replacementBlockHash,
+                replacementBlockHeight);
+        }
     }
 
     private void EnsureActiveSnapshotNoLock(DateTime nowUtc)
@@ -10905,59 +10897,6 @@ public class BootProtocolStateService
         {
             RecordNetworkEventNoLock(eventType, source, message, blockHash, blockHeight: null);
             RequestDeferredHistorySaveNoLock();
-        }
-    }
-
-    private bool TryLearnFreshParentFromTrustedShare(
-        string source,
-        BootShareValidationResult validation,
-        string expectedStateId)
-    {
-        if (!IsTrustedFreshParentSource(source) ||
-            string.IsNullOrWhiteSpace(validation.PrevBlockHash))
-        {
-            return false;
-        }
-
-        lock (_sync)
-        {
-            if (!string.Equals(expectedStateId, _state.CurrentStateId, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (IsAcceptedParentBlockHashNoLock(validation.PrevBlockHash))
-            {
-                return true;
-            }
-
-            if (_poolConfig.EnablePeerTipStaleProtection && _state.ProvisionalTip != null)
-            {
-                RecordNetworkEventNoLock(
-                    "fresh-parent-deferred",
-                    source,
-                    "Did not learn a new parent from DATUM while a peer-tip boundary awaited local Bitcoin validation.",
-                    validation.PrevBlockHash,
-                    blockHeight: null);
-                RequestDeferredHistorySaveNoLock();
-                return false;
-            }
-
-            RememberAcceptedParentBlockHashNoLock(validation.PrevBlockHash);
-            if (string.IsNullOrWhiteSpace(_state.CurrentTipBlockHash))
-            {
-                _state.CurrentTipBlockHash = validation.PrevBlockHash;
-                _state.CandidateStateId = ComputeCandidateStateIdNoLock();
-            }
-            RecordNetworkEventNoLock(
-                "fresh-parent-learned",
-                source,
-                $"Learned fresh parent from otherwise-valid local share at difficulty {ClientHandler.FormatDifficulty(validation.Difficulty)}.",
-                validation.PrevBlockHash,
-                blockHeight: null);
-            RequestDeferredSaveNoLock();
-            RequestDeferredHistorySaveNoLock();
-            return true;
         }
     }
 

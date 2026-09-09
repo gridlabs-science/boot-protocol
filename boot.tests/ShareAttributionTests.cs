@@ -620,23 +620,23 @@ public sealed class ShareAttributionTests
     [TestMethod]
     public async Task ProofBackedRemoteStateCannotRewriteUnverifiedPaidLineageAsync()
     {
-        using var remoteHarness = TestHarness.Create(currentTipBlockHash: OlderTipBlockHash);
-        ShareRecordingResult shareResult = await remoteHarness.StateService.SubmitShareAsync(
-            new RecordedShareSubmission
-            {
-                MinerAddress = AlternateAddress,
-                Username = string.Empty,
-                HeaderHex = SampleHeaderHex,
-                CoinbaseHex = SampleCoinbaseHex,
-                MerklePath = SampleMerklePath.ToList(),
-                PrevBlockHash = SamplePrevBlockHash,
-                Source = "datum"
-            },
-            "datum-block");
-        Assert.IsTrue(shareResult.Accepted, shareResult.RejectionReason);
+        byte[] header = Convert.FromHexString(SampleHeaderHex);
+        var proofSet = new List<BootShareProof>();
+        for (uint nonce = 0; nonce < 16; nonce++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(76, 4), nonce);
+            proofSet.Add(CreateValidatedProof(
+                Convert.ToHexString(header).ToLowerInvariant(),
+                SamplePrevBlockHash,
+                "seed-current"));
+        }
+
+        using var remoteHarness = TestHarness.Create(
+            currentTipBlockHash: SamplePrevBlockHash,
+            onDeckProofs: proofSet);
 
         RoundRotationResult rotation = await remoteHarness.StateService.RotateToNextRoundAsync(
-            SamplePrevBlockHash,
+            OlderTipBlockHash,
             "test-rotation",
             manual: false,
             blockHeight: 945001,
@@ -645,11 +645,11 @@ public sealed class ShareAttributionTests
         Assert.IsTrue(remoteBundle.WorkSetProofs.Count > 0);
 
         using var localHarness = TestHarness.Create(
-            currentTipBlockHash: SamplePrevBlockHash,
+            currentTipBlockHash: OlderTipBlockHash,
             currentRoundNumber: remoteBundle.CurrentRoundNumber);
         bool adopted = await localHarness.StateService.TryAdoptCurrentStateAsync(
             remoteBundle,
-            SamplePrevBlockHash,
+            OlderTipBlockHash,
             945001,
             "https://peer.example");
 
@@ -660,7 +660,7 @@ public sealed class ShareAttributionTests
     }
 
     [TestMethod]
-    public async Task DatumShareOnFreshParentIsAcceptedAndLearnsParentWithoutTipAdvanceAsync()
+    public async Task DatumShareCannotTeachNodeAnUnvalidatedFreshParentAsync()
     {
         using var harness = TestHarness.Create(currentTipBlockHash: OlderTipBlockHash);
 
@@ -675,17 +675,17 @@ public sealed class ShareAttributionTests
             Source = "datum"
         }, "datum-block");
 
-        Assert.IsTrue(result.Accepted, result.RejectionReason);
-        Assert.AreEqual(SamplePrevBlockHash, result.AcceptedProof?.PrevBlockHash);
+        Assert.IsFalse(result.Accepted);
+        StringAssert.Contains(result.RejectionReason, "outside the active Bitcoin tip");
 
         BootNetworkStatusDto status = harness.StateService.GetNetworkStatus();
         Assert.AreEqual(OlderTipBlockHash, status.CurrentTipBlockHash);
-        Assert.AreEqual(1, harness.StateService.GetOnDeckList().Count);
+        Assert.AreEqual(0, harness.StateService.GetOnDeckList().Count);
 
         Thread.Sleep(1200);
         PoolState persisted = JsonSerializer.Deserialize<PoolState>(File.ReadAllText(harness.StatePath))!;
         CollectionAssert.Contains(persisted.AcceptedParentBlockHashes, OlderTipBlockHash);
-        CollectionAssert.Contains(persisted.AcceptedParentBlockHashes, SamplePrevBlockHash);
+        CollectionAssert.DoesNotContain(persisted.AcceptedParentBlockHashes, SamplePrevBlockHash);
     }
 
     [TestMethod]
@@ -1395,7 +1395,7 @@ public sealed class ShareAttributionTests
             "test");
 
         Assert.IsFalse(result.Accepted);
-        Assert.AreEqual("New previous-parent proof rejected after the local snapshot boundary.", result.RejectionReason);
+        StringAssert.Contains(result.RejectionReason, "outside the active Bitcoin tip");
         Assert.AreEqual(0, harness.StateService.GetNetworkStatus().WorkSetCount);
     }
 
@@ -1685,6 +1685,36 @@ public sealed class ShareAttributionTests
                 .WorkSetProofs
                 .Select(proof => proof.ShareId)
                 .ToArray());
+    }
+
+    [TestMethod]
+    public async Task V22TwoBlockReorgRollsBackRemovedFamiliesBeforeReplacementAsync()
+    {
+        BootShareProof proof = CreateValidatedProof(SampleHeaderHex, SamplePrevBlockHash, "seed-current");
+        BootPayoutSnapshotContext predecessor = CreateSnapshotContext("seed-current", SampleExpectedWinners);
+        using var harness = TestHarness.Create(
+            sharedWinnerSlotCount: 1,
+            onDeckProofs: [proof],
+            snapshotContexts: [predecessor]);
+        string removedFirst = "0000000000000000000000000000000000000000000000000000000000a00601";
+        string removedSecond = "0000000000000000000000000000000000000000000000000000000000a00602";
+        string replacementFirst = "0000000000000000000000000000000000000000000000000000000000b00601";
+
+        await harness.StateService.ObserveChainTipAsync(removedFirst, "local-bitcoin", 945001);
+        BootNetworkStatusDto removed = await harness.StateService.ObserveChainTipAsync(
+            removedSecond,
+            "local-bitcoin",
+            945002);
+        BootNetworkStatusDto replacement = await harness.StateService.ObserveChainTipAsync(
+            replacementFirst,
+            "local-bitcoin-reorg",
+            945001);
+
+        Assert.AreNotEqual(removed.ActiveSnapshotFamilyId, replacement.ActiveSnapshotFamilyId);
+        Assert.AreEqual(replacementFirst, replacement.CurrentTipBlockHash);
+        Assert.AreEqual(945001L, replacement.CurrentTipBlockHeight);
+        Assert.AreEqual(1, replacement.WorkSetCount);
+        Assert.AreEqual(2, replacement.CurrentRoundNumber);
     }
 
     [TestMethod]

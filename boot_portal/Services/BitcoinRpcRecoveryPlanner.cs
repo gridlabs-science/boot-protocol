@@ -7,6 +7,8 @@ public sealed record BitcoinRpcRecoveryPlan(
 
 public static class BitcoinRpcRecoveryPlanner
 {
+    private const int ShallowReorganizationLookback = 1;
+
     public static BitcoinRpcRecoveryPlan Build(
         long? localHeight,
         string? localHash,
@@ -27,12 +29,12 @@ public static class BitcoinRpcRecoveryPlanner
 
         if (localHeight.Value > rpcHeight)
         {
-            return new BitcoinRpcRecoveryPlan([], false, true);
+            return new BitcoinRpcRecoveryPlan(ReorganizationHeights(rpcHeight), false, true);
         }
 
         if (localHeight.Value == rpcHeight)
         {
-            return new BitcoinRpcRecoveryPlan([rpcHeight], false, true);
+            return new BitcoinRpcRecoveryPlan(ReorganizationHeights(rpcHeight), false, true);
         }
 
         return new BitcoinRpcRecoveryPlan(
@@ -43,5 +45,15 @@ public static class BitcoinRpcRecoveryPlanner
                 .ToList(),
             false,
             false);
+    }
+
+    private static IReadOnlyList<long> ReorganizationHeights(long tipHeight)
+    {
+        long firstHeight = Math.Max(0, tipHeight - ShallowReorganizationLookback);
+        return Enumerable.Range(
+                checked((int)firstHeight),
+                checked((int)(tipHeight - firstHeight + 1)))
+            .Select(height => (long)height)
+            .ToList();
     }
 }

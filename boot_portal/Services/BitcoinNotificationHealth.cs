@@ -338,7 +338,8 @@ public sealed class BitcoinNotificationHealth
                 return false;
             }
 
-            DateTime reference = _lastRpcSuccessUtc ?? _lastRpcCheckUtc ?? _startedUtc;
+            // Repeated failed polls must not renew the grace period indefinitely.
+            DateTime reference = _lastRpcSuccessUtc ?? _startedUtc;
             if (!_rpcReachable && nowUtc - reference >= TimeSpan.FromSeconds(_lagGraceSeconds))
             {
                 reason = string.IsNullOrWhiteSpace(_lastRpcError)
@@ -462,7 +463,7 @@ public sealed class BitcoinNotificationHealth
             return false;
         }
 
-        DateTime reference = _lastRpcSuccessUtc ?? _lastRpcCheckUtc ?? _startedUtc;
+        DateTime reference = _lastRpcSuccessUtc ?? _startedUtc;
         if (!_rpcReachable && nowUtc - reference >= TimeSpan.FromSeconds(_lagGraceSeconds))
         {
             reason = string.IsNullOrWhiteSpace(_lastRpcError)

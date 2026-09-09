@@ -1,0 +1,9 @@
+# Audited historical fixtures and retired prototype identities.
+7ded520203d0c6859e1de70892651e12be8605c0:scripts/main-beta-status.sh:curl-auth-user:36
+428a84391ec4bc119cb32391ce933cfd318ca8e4:boot.tests/PoolConfigValidatorTests.cs:generic-api-key:142
+a636ac92f856e35fff3c7438d5d3acbfdf24b7d4:boot_portal/boot_portal_config.json:generic-api-key:3
+07f8da37b297264cbc349ecc695c705e59392f6a:boot_portal/boot_portal_config.json:generic-api-key:2
+07f8da37b297264cbc349ecc695c705e59392f6a:boot_portal/boot_portal_config.json:generic-api-key:3
+2df39a9959680f42455d178d661912af37a627ac:boot_portal/boot_portal_config.json:generic-api-key:3
+f8d788e4b771aea87f39a9b6ba9b19e86eb90dd3:boot_portal/boot_portal_config.json:generic-api-key:3
+f8d788e4b771aea87f39a9b6ba9b19e86eb90dd3:boot_portal/boot_portal_config.json:generic-api-key:2
