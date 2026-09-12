@@ -1,6 +1,7 @@
 import { FormEvent, startTransition, useEffect, useState } from "react";
 import { dashboardApi } from "./api";
 import { StatusDot } from "./components/Primitives";
+import { MinerConnectionPanel } from "./components/MinerConnection";
 import { SystemMap } from "./components/SystemMap";
 import { formatAge } from "./format";
 import { useDashboard } from "./hooks/useDashboard";
@@ -25,6 +26,7 @@ function MapApp() {
   const [adminKey, setAdminKey] = useState("");
   const [adminDraft, setAdminDraft] = useState("");
   const [unlockOpen, setUnlockOpen] = useState(false);
+  const [miningOpen, setMiningOpen] = useState(false);
   const live = useDiagram(adminKey);
 
   useEffect(() => {
@@ -82,6 +84,11 @@ function MapApp() {
             {live.stale ? "reconnecting" : "live"}
           </span>
           <a className="details-link" href="/details">Details</a>
+          {summary.mining?.nativeSv2.enabled ? (
+            <button type="button" className="operator-button" onClick={() => setMiningOpen(true)}>
+              Connect miner
+            </button>
+          ) : null}
           <button
             type="button"
             className="icon-button"
@@ -90,13 +97,15 @@ function MapApp() {
           >
             {theme === "dark" ? "○" : "●"}
           </button>
-          <button
-            type="button"
-            className={adminKey ? "operator-button operator-unlocked" : "operator-button"}
-            onClick={() => adminKey ? setAdminKey("") : setUnlockOpen(true)}
-          >
-            {adminKey ? "Lock operator" : "Operator"}
-          </button>
+          {summary.capabilities.operatorApiAvailable ? (
+            <button
+              type="button"
+              className={adminKey ? "operator-button operator-unlocked" : "operator-button"}
+              onClick={() => adminKey ? setAdminKey("") : setUnlockOpen(true)}
+            >
+              {adminKey ? "Lock operator" : "Operator"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -134,6 +143,24 @@ function MapApp() {
           close={() => setUnlockOpen(false)}
           unlock={unlock}
         />
+      ) : null}
+      {miningOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setMiningOpen(false)}>
+          <section
+            className="modal connection-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="miner-connection-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Canonical miner transport</p>
+            <h2 id="miner-connection-title">Connect a native SV2 miner</h2>
+            <MinerConnectionPanel summary={summary} />
+            <div className="modal-actions">
+              <button type="button" onClick={() => setMiningOpen(false)}>Close</button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );
@@ -242,13 +269,15 @@ function DetailsApp() {
           >
             {theme === "dark" ? "○" : "●"}
           </button>
-          <button
-            type="button"
-            className={adminKey ? "operator-button operator-unlocked" : "operator-button"}
-            onClick={() => adminKey ? setAdminKey("") : setUnlockOpen(true)}
-          >
-            {adminKey ? "Lock operator" : "Operator"}
-          </button>
+          {summary.capabilities.operatorApiAvailable ? (
+            <button
+              type="button"
+              className={adminKey ? "operator-button operator-unlocked" : "operator-button"}
+              onClick={() => adminKey ? setAdminKey("") : setUnlockOpen(true)}
+            >
+              {adminKey ? "Lock operator" : "Operator"}
+            </button>
+          ) : null}
         </div>
       </header>
 

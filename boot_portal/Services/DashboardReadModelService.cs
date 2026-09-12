@@ -109,6 +109,15 @@ public sealed class DashboardReadModelService
                 TargetIntervalSeconds = status.PulseTargetIntervalSeconds,
                 RelayTtl = status.PulseRelayTtl
             },
+            Mining = new DashboardMiningDto
+            {
+                NativeSv2 = new DashboardNativeSv2Dto
+                {
+                    Enabled = _poolConfig.NativeSv2Enabled,
+                    PublicHost = _poolConfig.NativeSv2PublicHost,
+                    PublicPort = _poolConfig.NativeSv2PublicPort
+                }
+            },
             Capabilities = new DashboardCapabilitiesDto
             {
                 WebUiEnabled = _poolConfig.EnableWebUi,

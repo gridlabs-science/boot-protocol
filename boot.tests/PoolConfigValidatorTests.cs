@@ -39,6 +39,19 @@ public sealed class PoolConfigValidatorTests
     }
 
     [TestMethod]
+    public void EnabledNativeSv2RequiresAValidPublicPort()
+    {
+        var config = new PoolConfig
+        {
+            NativeSv2Enabled = true,
+            NativeSv2PublicPort = 0
+        };
+
+        Assert.IsTrue(PoolConfigValidator.Validate(config).Any(error =>
+            error.Contains("native_sv2_public_port", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
     public void BitcoinNotificationConfigurationRejectsUnsafeOrAmbiguousRpcSettings()
     {
         var config = new PoolConfig

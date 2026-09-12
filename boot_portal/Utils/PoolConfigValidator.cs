@@ -233,6 +233,14 @@ public static class PoolConfigValidator
         ValidatePositive(errors, config.StaleDatumDisconnectCooldownSeconds, "stale_datum_disconnect_cooldown_seconds");
         ValidatePositive(errors, config.StaleDatumRefreshIntervalSeconds, "stale_datum_refresh_interval_seconds");
         ValidateNonNegativePort(errors, config.StratumV1ProxyPort, "stratum_v1_proxy_port");
+        if (config.NativeSv2Enabled)
+        {
+            ValidateRequiredPort(errors, config.NativeSv2PublicPort, "native_sv2_public_port");
+        }
+        else
+        {
+            ValidateNonNegativePort(errors, config.NativeSv2PublicPort, "native_sv2_public_port");
+        }
         if (string.IsNullOrWhiteSpace(config.StratumV1ProxyHost) && config.StratumV1ProxyPort > 0)
         {
             errors.Add("stratum_v1_proxy_host is required when stratum_v1_proxy_port is configured");

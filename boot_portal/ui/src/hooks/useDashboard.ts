@@ -1,6 +1,6 @@
 import { HubConnectionBuilder, HubConnectionState } from "@microsoft/signalr";
 import { useEffect, useEffectEvent, useState } from "react";
-import { dashboardApi } from "../api";
+import { dashboardApi, redirectToSetupIfRequired } from "../api";
 import type {
   DashboardChanged,
   DashboardState,
@@ -39,6 +39,7 @@ export function useDashboard(windowKey: WindowKey, adminKey: string) {
         lastUpdatedUtc: new Date().toISOString()
       }));
     } catch (error) {
+      if (redirectToSetupIfRequired(error)) return;
       setState((current) => ({
         ...current,
         loading: false,

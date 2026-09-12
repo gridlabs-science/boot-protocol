@@ -66,6 +66,15 @@ export interface DashboardSummary {
     relayTtl: number;
     interpretation: string;
   };
+  mining?: {
+    nativeSv2: {
+      enabled: boolean;
+      publicHost: string;
+      publicPort: number;
+      scheme: string;
+      usernameGuidance: string;
+    };
+  };
   capabilities: {
     webUiEnabled: boolean;
     legacyUiEnabled: boolean;

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { dashboardApi } from "../api";
 import { Card, EmptyState, HashValue, Metric, Progress, StatusDot } from "../components/Primitives";
+import { MinerConnectionPanel } from "../components/MinerConnection";
 import { formatAge, formatDate, formatPercent, formatSats, formatUncertainty } from "../format";
 import type { DashboardModuleContext } from "./context";
 
@@ -155,6 +156,14 @@ function PulseModule({ summary }: DashboardModuleContext) {
         />
       </div>
       <p className="explain">{pulse.interpretation}</p>
+    </Card>
+  );
+}
+
+function MinerConnectionModule({ summary }: DashboardModuleContext) {
+  return (
+    <Card title="Connect a miner" eyebrow="Native Stratum V2">
+      <MinerConnectionPanel summary={summary} />
     </Card>
   );
 }
@@ -435,6 +444,7 @@ function ConsoleModule(context: DashboardModuleContext) {
 
 export const dashboardModules: DashboardModule[] = [
   { id: "status", scope: "public", className: "module-full", render: (context) => <StatusModule {...context} /> },
+  { id: "miner-connection", scope: "public", className: "module-full", render: (context) => <MinerConnectionModule {...context} /> },
   { id: "snapshot", scope: "public", className: "module-half", render: (context) => <SnapshotModule {...context} /> },
   { id: "reserve", scope: "public", className: "module-half", render: (context) => <ReserveModule {...context} /> },
   { id: "work-rate", scope: "public", className: "module-wide", render: (context) => <WorkRateModule {...context} /> },

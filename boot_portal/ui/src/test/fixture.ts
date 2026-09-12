@@ -84,6 +84,15 @@ export const summaryFixture: DashboardSummary = {
     relayTtl: 1,
     interpretation: "Pulse proofs are liveness."
   },
+  mining: {
+    nativeSv2: {
+      enabled: true,
+      publicHost: "node.gridpool.test",
+      publicPort: 34265,
+      scheme: "stratum2+noise",
+      usernameGuidance: "Use a payout address or worker label."
+    }
+  },
   capabilities: {
     webUiEnabled: true,
     legacyUiEnabled: true,

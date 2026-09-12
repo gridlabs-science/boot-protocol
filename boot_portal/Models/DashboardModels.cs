@@ -26,7 +26,23 @@ public sealed class DashboardSummaryDto
     public DashboardSnapshotDto Snapshot { get; set; } = new();
     public DashboardWorkRateEstimateDto WorkRate { get; set; } = new();
     public DashboardPulseDto Pulse { get; set; } = new();
+    public DashboardMiningDto Mining { get; set; } = new();
     public DashboardCapabilitiesDto Capabilities { get; set; } = new();
+}
+
+public sealed class DashboardMiningDto
+{
+    public DashboardNativeSv2Dto NativeSv2 { get; set; } = new();
+}
+
+public sealed class DashboardNativeSv2Dto
+{
+    public bool Enabled { get; set; }
+    public string PublicHost { get; set; } = string.Empty;
+    public int PublicPort { get; set; } = 34265;
+    public string Scheme { get; set; } = "stratum2+noise";
+    public string UsernameGuidance { get; set; } =
+        "Use a Bitcoin payout address for per-miner slot-0 attribution, or a worker label to use the node payout address.";
 }
 
 public sealed class DashboardNodeDto
@@ -132,6 +148,7 @@ public sealed class DashboardCapabilitiesDto
     public List<string> Modules { get; set; } =
     [
         "status",
+        "miner-connection",
         "snapshot",
         "reserve",
         "work-rate",

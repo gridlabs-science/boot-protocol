@@ -105,6 +105,9 @@
   "datum_keepalive_interval_seconds": 30,
   "bitcoin_zmq_endpoint": "tcp://127.0.0.1:28332",
   "bitcoin_zmq_rawblock_endpoint": "tcp://127.0.0.1:28333",
+  "native_sv2_enabled": false,
+  "native_sv2_public_host": "",
+  "native_sv2_public_port": 34265,
   "stratum_v1_proxy_host": "",
   "stratum_v1_proxy_port": 0
 }
