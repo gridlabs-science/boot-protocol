@@ -1,6 +1,6 @@
 import { HubConnectionBuilder, HubConnectionState } from "@microsoft/signalr";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
-import { dashboardApi } from "../api";
+import { dashboardApi, redirectToSetupIfRequired } from "../api";
 import type {
   DashboardChanged,
   DashboardDiagram,
@@ -39,6 +39,7 @@ export function useDiagram(adminKey: string) {
   );
 
   const reportFailure = useEffectEvent((reason: unknown, fallback: string) => {
+    if (redirectToSetupIfRequired(reason)) return;
     setLoading(false);
     setStale(diagram !== null);
     setError(reason instanceof Error ? reason.message : fallback);

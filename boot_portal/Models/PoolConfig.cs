@@ -313,6 +313,15 @@ public class PoolConfig
     [JsonPropertyName("local_sv2_api_url")]
     public string LocalSv2ApiUrl { get; set; } = string.Empty;
 
+    [JsonPropertyName("native_sv2_enabled")]
+    public bool NativeSv2Enabled { get; set; }
+
+    [JsonPropertyName("native_sv2_public_host")]
+    public string NativeSv2PublicHost { get; set; } = string.Empty;
+
+    [JsonPropertyName("native_sv2_public_port")]
+    public int NativeSv2PublicPort { get; set; } = 34265;
+
     [JsonPropertyName("admin_rate_limit_per_minute")]
     public int AdminRateLimitPerMinute { get; set; } = 12;
 

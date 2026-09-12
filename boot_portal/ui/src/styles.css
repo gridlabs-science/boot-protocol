@@ -821,6 +821,69 @@ footer div {
   margin-top: 1rem;
 }
 
+.connection-modal {
+  width: min(680px, 100%);
+}
+
+.miner-connection {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.connection-target {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem 0.75rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  padding: 1rem;
+  background: var(--panel-soft);
+}
+
+.connection-target > span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.connection-target code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.connection-target button {
+  padding: 0.45rem 0.65rem;
+}
+
+.connection-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.connection-fields div {
+  border-top: 1px solid var(--line);
+  padding-top: 0.65rem;
+}
+
+.connection-fields dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.connection-fields dd {
+  margin: 0.25rem 0 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
 .loading-screen,
 .fatal-screen {
   display: grid;

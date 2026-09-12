@@ -49,7 +49,7 @@ Production API:
 
 | Route | Visibility | Purpose |
 |---|---|---|
-| `/api/dashboard/v1/summary` | Public, redacted | Node truth, snapshot, work rate, pulse and capabilities |
+| `/api/dashboard/v1/summary` | Public, redacted | Node truth, snapshot, work rate, pulse, miner connections and capabilities |
 | `/api/dashboard/v1/history` | Public, redacted | Aggregated 6h, 24h or 7d history |
 | `/api/dashboard/v1/address/{address}` | Public | Locked and provisional positions for one address |
 | `/api/dashboard/v1/operator` | Admin key | Local adapters, peers and detailed diagnostics |
@@ -64,6 +64,12 @@ SignalR never carries complete internal state. `DashboardChanged` tells clients
 which topics changed; clients refetch the typed HTTP projection. Operator keys
 stay in React memory only and must not enter URLs, browser storage, logs, or
 exports.
+
+Miner-facing endpoints are explicit non-secret summary data. Packaged nodes set
+`native_sv2_enabled`, `native_sv2_public_host`, and `native_sv2_public_port`;
+when the host is blank the dashboard suggests the browser hostname and explains
+that a reachable LAN hostname or IP may be substituted. Never infer that the
+operator API exists merely because the UI is private behind an appliance proxy.
 
 The production map owns one SignalR connection per tab. Invalidation refreshes
 are coalesced and single-flight: journal reads run at most once per second,

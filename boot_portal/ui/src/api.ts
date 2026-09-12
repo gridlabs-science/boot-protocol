@@ -11,11 +11,19 @@ import type {
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = "") {
     super(message);
     this.status = status;
+    this.code = code;
   }
+}
+
+export function redirectToSetupIfRequired(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.code !== "setup_required") return false;
+  if (window.location.pathname !== "/setup") window.location.replace("/setup");
+  return true;
 }
 
 async function request<T>(path: string, adminKey?: string): Promise<T> {
@@ -30,13 +38,15 @@ async function request<T>(path: string, adminKey?: string): Promise<T> {
   });
   if (!response.ok) {
     let reason = `${response.status} ${response.statusText}`;
+    let code = "";
     try {
-      const payload = (await response.json()) as { reason?: string; message?: string };
+      const payload = (await response.json()) as { status?: string; reason?: string; message?: string };
+      code = payload.status ?? "";
       reason = payload.reason ?? payload.message ?? reason;
     } catch {
       // Keep the HTTP status when the response is not JSON.
     }
-    throw new ApiError(response.status, reason);
+    throw new ApiError(response.status, reason, code);
   }
   return (await response.json()) as T;
 }
