@@ -795,6 +795,13 @@ public class Program
         {
             config.TrustedPrivateDashboardEnabled = enabled;
         }
+
+        string? nativeSv2AuthorityPublicKey =
+            Environment.GetEnvironmentVariable("GRIDPOOL_NATIVE_SV2_AUTHORITY_PUBLIC_KEY");
+        if (!string.IsNullOrWhiteSpace(nativeSv2AuthorityPublicKey))
+        {
+            config.NativeSv2AuthorityPublicKey = nativeSv2AuthorityPublicKey.Trim();
+        }
     }
 
     private static RateLimitPartition<string> CreateRateLimitPartition(HttpContext context, PoolConfig poolConfig, string policyName, int permitLimit)

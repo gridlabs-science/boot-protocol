@@ -71,6 +71,7 @@ export interface DashboardSummary {
       enabled: boolean;
       publicHost: string;
       publicPort: number;
+      authorityPublicKey: string;
       scheme: string;
       usernameGuidance: string;
     };

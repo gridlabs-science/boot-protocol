@@ -70,6 +70,27 @@ public sealed class SecurityHardeningTests
     }
 
     [TestMethod]
+    public void NativeSv2AuthorityEnvironmentOverrideSupportsPackageUpgrades()
+    {
+        const string variable = "GRIDPOOL_NATIVE_SV2_AUTHORITY_PUBLIC_KEY";
+        const string publicKey = "9exampleAuthorityPublicKey";
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        try
+        {
+            var config = ValidConfig();
+            Environment.SetEnvironmentVariable(variable, $"  {publicKey}  ");
+
+            Program.ApplyPoolConfigEnvironmentOverrides(config);
+
+            Assert.AreEqual(publicKey, config.NativeSv2AuthorityPublicKey);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+        }
+    }
+
+    [TestMethod]
     public void StoredMinerLabelIsBoundedAndMarkupFree()
     {
         string normalized = BootShareVerifier.NormalizeUsernameForStorage(

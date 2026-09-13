@@ -8,6 +8,7 @@ describe("MinerConnectionPanel", () => {
     render(<MinerConnectionPanel summary={summaryFixture} />);
 
     expect(screen.getByText("stratum2+noise://node.gridpool.test:34265")).toBeInTheDocument();
+    expect(screen.getByText("9exampleAuthorityPublicKey")).toBeInTheDocument();
     expect(screen.getByText("Your payout address, or a worker label")).toBeInTheDocument();
   });
 

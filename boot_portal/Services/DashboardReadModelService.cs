@@ -115,7 +115,8 @@ public sealed class DashboardReadModelService
                 {
                     Enabled = _poolConfig.NativeSv2Enabled,
                     PublicHost = _poolConfig.NativeSv2PublicHost,
-                    PublicPort = _poolConfig.NativeSv2PublicPort
+                    PublicPort = _poolConfig.NativeSv2PublicPort,
+                    AuthorityPublicKey = _poolConfig.NativeSv2AuthorityPublicKey
                 }
             },
             Capabilities = new DashboardCapabilitiesDto

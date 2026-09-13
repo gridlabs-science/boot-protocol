@@ -5,6 +5,7 @@ const unavailableSv2 = {
   enabled: false,
   publicHost: "",
   publicPort: 34265,
+  authorityPublicKey: "",
   scheme: "stratum2+noise",
   usernameGuidance: "Use a Bitcoin payout address or worker label."
 };
@@ -49,10 +50,14 @@ export function MinerConnectionPanel({ summary }: { summary: DashboardSummary })
       <dl className="connection-fields">
         <div><dt>Host</dt><dd>{connectionHost(sv2.publicHost)}</dd></div>
         <div><dt>Port</dt><dd>{sv2.publicPort}</dd></div>
+        <div><dt>Authority key</dt><dd><code>{sv2.authorityPublicKey || "Not advertised"}</code></dd></div>
         <div><dt>Protocol</dt><dd>Native Stratum V2 with Noise</dd></div>
         <div><dt>Username</dt><dd>Your payout address, or a worker label</dd></div>
       </dl>
       <p className="explain">{sv2.usernameGuidance}</p>
+      <p className="explain">
+        AxeOS users must paste the authority key into <strong>SV2 Authority Pubkey</strong> under the pool&apos;s advanced options.
+      </p>
       <p className="explain">
         The miner must be on a network that can reach this node. If the suggested
         hostname does not resolve from the miner, use the Umbrel device&apos;s LAN IP.

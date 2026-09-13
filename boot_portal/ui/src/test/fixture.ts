@@ -89,6 +89,7 @@ export const summaryFixture: DashboardSummary = {
       enabled: true,
       publicHost: "node.gridpool.test",
       publicPort: 34265,
+      authorityPublicKey: "9exampleAuthorityPublicKey",
       scheme: "stratum2+noise",
       usernameGuidance: "Use a payout address or worker label."
     }
