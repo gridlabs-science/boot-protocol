@@ -328,6 +328,9 @@ public class PoolConfig
     [JsonPropertyName("native_sv2_public_port")]
     public int NativeSv2PublicPort { get; set; } = 34265;
 
+    [JsonPropertyName("native_sv2_authority_public_key")]
+    public string NativeSv2AuthorityPublicKey { get; set; } = string.Empty;
+
     [JsonPropertyName("admin_rate_limit_per_minute")]
     public int AdminRateLimitPerMinute { get; set; } = 12;
 

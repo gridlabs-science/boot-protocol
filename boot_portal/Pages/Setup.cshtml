@@ -46,19 +46,22 @@
                         <dl>
                             <div><dt>Host</dt><dd>@Model.NativeSv2Host</dd></div>
                             <div><dt>Port</dt><dd>@Model.NativeSv2Port</dd></div>
+                            <div><dt>Authority key</dt><dd><code>@Model.NativeSv2AuthorityPublicKey</code></dd></div>
                             <div><dt>Username</dt><dd>Your payout address or worker label</dd></div>
                         </dl>
+                        <p>AxeOS users must paste the authority key into <strong>SV2 Authority Pubkey</strong> under the pool's advanced options.</p>
                         <p>If <code>@Model.NativeSv2Host</code> does not resolve from your miner, use this Umbrel device's LAN IP with port @Model.NativeSv2Port.</p>
                     </section>
                 }
                 @if (Model.AutomaticRestart)
                 {
-                    <p class="safety-note" id="restart-status">Waiting for the node to become ready. This page will open the dashboard automatically.</p>
+                    <p class="safety-note">GridPool is restarting. Wait a few seconds, then open the dashboard.</p>
                 }
                 else
                 {
                     <p class="safety-note">GridPool will remain in setup-only mode until it restarts. No mining work or peer relay is active yet.</p>
                 }
+                <a class="dashboard-button" href="/">Open GridPool dashboard</a>
             }
             else
             {
@@ -77,9 +80,5 @@
             }
         </section>
     </main>
-    @if (Model.AutomaticRestart)
-    {
-        <script src="/setup.js" defer></script>
-    }
 </body>
 </html>

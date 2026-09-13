@@ -40,6 +40,7 @@ public sealed class DashboardNativeSv2Dto
     public bool Enabled { get; set; }
     public string PublicHost { get; set; } = string.Empty;
     public int PublicPort { get; set; } = 34265;
+    public string AuthorityPublicKey { get; set; } = string.Empty;
     public string Scheme { get; set; } = "stratum2+noise";
     public string UsernameGuidance { get; set; } =
         "Use a Bitcoin payout address for per-miner slot-0 attribution, or a worker label to use the node payout address.";

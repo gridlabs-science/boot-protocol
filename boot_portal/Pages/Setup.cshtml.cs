@@ -53,6 +53,8 @@ public sealed class SetupModel(
 
     public int NativeSv2Port => _poolConfig.NativeSv2PublicPort;
 
+    public string NativeSv2AuthorityPublicKey => _poolConfig.NativeSv2AuthorityPublicKey;
+
     public string NativeSv2Url => $"stratum2+noise://{NativeSv2Host}:{NativeSv2Port}";
 
     public IActionResult OnGet()

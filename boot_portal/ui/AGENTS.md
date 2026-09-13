@@ -66,7 +66,8 @@ stay in React memory only and must not enter URLs, browser storage, logs, or
 exports.
 
 Miner-facing endpoints are explicit non-secret summary data. Packaged nodes set
-`native_sv2_enabled`, `native_sv2_public_host`, and `native_sv2_public_port`;
+`native_sv2_enabled`, `native_sv2_public_host`, `native_sv2_public_port`, and
+`native_sv2_authority_public_key`;
 when the host is blank the dashboard suggests the browser hostname and explains
 that a reachable LAN hostname or IP may be substituted. Appliance wrappers may
 explicitly set `trusted_private_dashboard_enabled` when their authenticated

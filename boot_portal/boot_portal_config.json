@@ -60,6 +60,7 @@
   "native_sv2_enabled": false,
   "native_sv2_public_host": "",
   "native_sv2_public_port": 34265,
+  "native_sv2_authority_public_key": "",
   "stratum_v1_proxy_host": "",
   "stratum_v1_proxy_port": 0,
   "grid_labs_support_fee_enabled": true,

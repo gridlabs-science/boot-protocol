@@ -166,6 +166,21 @@ button {
 
 button:hover { transform: translateY(-1px); }
 
+.dashboard-button {
+    display: block;
+    margin-top: 1rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 0.9rem 1.1rem;
+    background: var(--text);
+    color: var(--bg);
+    font-weight: 650;
+    text-align: center;
+    text-decoration: none;
+}
+
+.dashboard-button:hover { transform: translateY(-1px); }
+
 .field-validation,
 .validation-summary { display: block; margin-top: 0.6rem; color: var(--bad); }
 
