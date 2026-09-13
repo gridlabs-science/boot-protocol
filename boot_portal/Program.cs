@@ -658,6 +658,7 @@ public class Program
                 if (config != null)
                 {
                     ApplyPoolConfigDefaults(config);
+                    ApplyPoolConfigEnvironmentOverrides(config);
                     PoolConfigValidator.ValidateOrThrow(config);
                     Console.WriteLine(
                         string.IsNullOrWhiteSpace(localConfigPath) || !File.Exists(localConfigPath)
@@ -674,6 +675,7 @@ public class Program
         Console.WriteLine($"🔧 Using default pool config");
         var fallbackConfig = new PoolConfig();
         ApplyPoolConfigDefaults(fallbackConfig);
+        ApplyPoolConfigEnvironmentOverrides(fallbackConfig);
         PoolConfigValidator.ValidateOrThrow(fallbackConfig);
         return fallbackConfig;
     }
@@ -782,6 +784,16 @@ public class Program
         {
             config.BootstrapPeers.AddRange(DefaultPublicSeedEndpoints.Where(seed =>
                 !string.Equals(config.PublicBaseUrl.Trim().TrimEnd('/'), seed, StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    internal static void ApplyPoolConfigEnvironmentOverrides(PoolConfig config)
+    {
+        string? trustedPrivateDashboard =
+            Environment.GetEnvironmentVariable("GRIDPOOL_TRUSTED_PRIVATE_DASHBOARD_ENABLED");
+        if (bool.TryParse(trustedPrivateDashboard, out bool enabled))
+        {
+            config.TrustedPrivateDashboardEnabled = enabled;
         }
     }
 
