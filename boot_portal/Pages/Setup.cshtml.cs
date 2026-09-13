@@ -4,16 +4,19 @@ using boot_portal.Services;
 using boot_portal.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Extensions.Hosting;
 
 namespace boot_portal.Pages;
 
 public sealed class SetupModel(
     PoolConfig poolConfig,
     NodeSetupState setupState,
+    IHostApplicationLifetime applicationLifetime,
     ILogger<SetupModel> logger) : PageModel
 {
     private readonly PoolConfig _poolConfig = poolConfig;
     private readonly NodeSetupState _setupState = setupState;
+    private readonly IHostApplicationLifetime _applicationLifetime = applicationLifetime;
     private readonly ILogger<SetupModel> _logger = logger;
 
     [BindProperty]
@@ -23,6 +26,8 @@ public sealed class SetupModel(
     public string? SavedAddress { get; private set; }
 
     public bool RestartRequired => _setupState.RestartRequired;
+
+    public bool AutomaticRestart => RestartRequired && _poolConfig.RestartAfterSetup;
 
     public string BitcoinNetwork => BitcoinScript.NormalizeNetwork(_poolConfig.BitcoinNetwork);
 
@@ -73,6 +78,14 @@ public sealed class SetupModel(
             _poolConfig.PoolPayoutScript = payoutAddress;
             _setupState.MarkSaved(payoutAddress);
             SavedAddress = payoutAddress;
+            if (_poolConfig.RestartAfterSetup)
+            {
+                HttpContext.Response.OnCompleted(() =>
+                {
+                    _applicationLifetime.StopApplication();
+                    return Task.CompletedTask;
+                });
+            }
         }
         catch (Exception ex)
         {

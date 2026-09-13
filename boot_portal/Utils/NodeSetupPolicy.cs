@@ -6,6 +6,7 @@ public static class NodeSetupPolicy
     {
         return path.StartsWithSegments("/setup", StringComparison.OrdinalIgnoreCase) ||
                path.Equals("/setup.css", StringComparison.OrdinalIgnoreCase) ||
+               path.Equals("/setup.js", StringComparison.OrdinalIgnoreCase) ||
                path.Equals("/health/live", StringComparison.OrdinalIgnoreCase) ||
                path.Equals("/health/ready", StringComparison.OrdinalIgnoreCase);
     }

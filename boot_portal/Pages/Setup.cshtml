@@ -25,12 +25,26 @@
 
             @if (Model.RestartRequired)
             {
-                <p class="lede">The payout address is stored. Restart the GridPool app to start networking and mining services with this configuration.</p>
+                @if (Model.AutomaticRestart)
+                {
+                    <p class="lede">The payout address is stored. GridPool is restarting with mining and peer services enabled.</p>
+                }
+                else
+                {
+                    <p class="lede">The payout address is stored. Restart the GridPool app to start networking and mining services with this configuration.</p>
+                }
                 <div class="address-summary">
                     <span>Locked payout address</span>
                     <code>@Model.SavedAddress</code>
                 </div>
-                <p class="safety-note">GridPool will remain in setup-only mode until it restarts. No mining work or peer relay is active yet.</p>
+                @if (Model.AutomaticRestart)
+                {
+                    <p class="safety-note" id="restart-status">Waiting for the node to become ready. This page will open the dashboard automatically.</p>
+                }
+                else
+                {
+                    <p class="safety-note">GridPool will remain in setup-only mode until it restarts. No mining work or peer relay is active yet.</p>
+                }
             }
             else
             {
@@ -49,5 +63,9 @@
             }
         </section>
     </main>
+    @if (Model.AutomaticRestart)
+    {
+        <script src="/setup.js" defer></script>
+    }
 </body>
 </html>
