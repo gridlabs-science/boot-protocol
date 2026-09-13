@@ -4659,8 +4659,10 @@ public class BootProtocolStateService
         }
         if (GetActiveConsensusVersion() >= BootProtocolVersions.ConsensusVersion &&
             bundle.SnapshotFamilyMember != null &&
-            hasLocalActiveFamily &&
-            (!localStateIsEmpty || _poolConfig.AllowEmptySnapshotBootstrap))
+            ShouldReconcileSnapshotFamily(
+                hasLocalActiveFamily,
+                localStateIsEmpty,
+                _poolConfig.AllowEmptySnapshotBootstrap))
         {
             return await TryReconcileSiblingSnapshotAsync(
                 bundle,
@@ -6368,6 +6370,14 @@ public class BootProtocolStateService
         // A full reserve can legitimately contain proofs created against many payout snapshots.
         // Bound imports by the proof capacity, not by the much smaller local history-retention cap.
         return config.SnapshotProofSlotCount + config.WorkSetReserveLimit + 2;
+    }
+
+    internal static bool ShouldReconcileSnapshotFamily(
+        bool hasLocalActiveFamily,
+        bool localStateIsEmpty,
+        bool allowEmptySnapshotBootstrap)
+    {
+        return hasLocalActiveFamily && (!localStateIsEmpty || allowEmptySnapshotBootstrap);
     }
 
     private int RepairMissingWorkSetSnapshotContextsNoLock(DateTime nowUtc)

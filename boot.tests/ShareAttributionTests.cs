@@ -1478,6 +1478,23 @@ public sealed class ShareAttributionTests
     }
 
     [TestMethod]
+    public void FreshProductionPlaceholderDoesNotEnterSiblingReconciliation()
+    {
+        Assert.IsFalse(BootProtocolStateService.ShouldReconcileSnapshotFamily(
+            hasLocalActiveFamily: true,
+            localStateIsEmpty: true,
+            allowEmptySnapshotBootstrap: false));
+        Assert.IsTrue(BootProtocolStateService.ShouldReconcileSnapshotFamily(
+            hasLocalActiveFamily: true,
+            localStateIsEmpty: false,
+            allowEmptySnapshotBootstrap: false));
+        Assert.IsTrue(BootProtocolStateService.ShouldReconcileSnapshotFamily(
+            hasLocalActiveFamily: true,
+            localStateIsEmpty: true,
+            allowEmptySnapshotBootstrap: true));
+    }
+
+    [TestMethod]
     public async Task RegtestSiblingImportAcceptsProofRecordedAgainstExplicitEmptyBootstrapSnapshotAsync()
     {
         using var bootstrap = TestHarness.Create(
