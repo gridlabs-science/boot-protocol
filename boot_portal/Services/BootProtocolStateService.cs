@@ -4659,7 +4659,8 @@ public class BootProtocolStateService
         }
         if (GetActiveConsensusVersion() >= BootProtocolVersions.ConsensusVersion &&
             bundle.SnapshotFamilyMember != null &&
-            hasLocalActiveFamily)
+            hasLocalActiveFamily &&
+            (!localStateIsEmpty || _poolConfig.AllowEmptySnapshotBootstrap))
         {
             return await TryReconcileSiblingSnapshotAsync(
                 bundle,
