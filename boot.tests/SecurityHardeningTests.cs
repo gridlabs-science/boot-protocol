@@ -7,6 +7,7 @@ using boot_portal.Utils;
 namespace boot.tests;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class SecurityHardeningTests
 {
     private const string MainnetPayoutAddress = "bc1qd9m04z95mglaxd9e9accmhyjdlmkfmzjprkq4p";
@@ -46,6 +47,26 @@ public sealed class SecurityHardeningTests
 
         config.TrustedPrivateDashboardEnabled = true;
         Assert.IsTrue(DashboardController.CanViewOperatorDiagnostics(config, adminAuthorized: false));
+    }
+
+    [TestMethod]
+    public void PrivateDashboardEnvironmentOverrideSupportsPackageUpgrades()
+    {
+        const string variable = "GRIDPOOL_TRUSTED_PRIVATE_DASHBOARD_ENABLED";
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        try
+        {
+            var config = ValidConfig();
+            Environment.SetEnvironmentVariable(variable, "true");
+
+            Program.ApplyPoolConfigEnvironmentOverrides(config);
+
+            Assert.IsTrue(config.TrustedPrivateDashboardEnabled);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+        }
     }
 
     [TestMethod]
