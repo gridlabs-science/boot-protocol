@@ -554,7 +554,9 @@ public class BootNetworkController : ControllerBase
     }
 
     private bool CanViewOperatorDiagnostics() =>
-        _poolConfig.PublicOperatorDiagnosticsEnabled || IsAdminAuthorized();
+        _poolConfig.PublicOperatorDiagnosticsEnabled ||
+        _poolConfig.TrustedPrivateDashboardEnabled ||
+        IsAdminAuthorized();
 
     private bool IsAdminAuthorized()
     {

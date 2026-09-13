@@ -141,6 +141,7 @@ public sealed class DashboardCapabilitiesDto
     public bool WebUiEnabled { get; set; }
     public bool LegacyUiEnabled { get; set; }
     public bool OperatorApiAvailable { get; set; }
+    public bool OperatorAccessImplicit { get; set; }
     public bool AddressLookupAvailable { get; set; } = true;
     public bool WorkRateTelemetryAvailable { get; set; } = true;
     public bool PulseTelemetryAvailable { get; set; } = true;

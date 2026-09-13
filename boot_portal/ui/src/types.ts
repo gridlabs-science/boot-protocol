@@ -79,6 +79,7 @@ export interface DashboardSummary {
     webUiEnabled: boolean;
     legacyUiEnabled: boolean;
     operatorApiAvailable: boolean;
+    operatorAccessImplicit: boolean;
     addressLookupAvailable: boolean;
     workRateTelemetryAvailable: boolean;
     pulseTelemetryAvailable: boolean;

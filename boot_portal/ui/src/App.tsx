@@ -1,7 +1,7 @@
 import { FormEvent, startTransition, useEffect, useState } from "react";
 import { dashboardApi } from "./api";
 import { StatusDot } from "./components/Primitives";
-import { MinerConnectionPanel } from "./components/MinerConnection";
+import { MinerConnectionPanel, nativeSv2Url } from "./components/MinerConnection";
 import { SystemMap } from "./components/SystemMap";
 import { formatAge } from "./format";
 import { useDashboard } from "./hooks/useDashboard";
@@ -63,6 +63,7 @@ function MapApp() {
 
   const summary = live.summary;
   const testnet = summary.node.bitcoinNetwork !== "mainnet";
+  const operatorAccessImplicit = summary.capabilities.operatorAccessImplicit;
   return (
     <div className={testnet ? "app map-app app-testnet" : "app map-app"}>
       <header className="truth-bar map-truth-bar">
@@ -85,7 +86,7 @@ function MapApp() {
           </span>
           <a className="details-link" href="/details">Details</a>
           {summary.mining?.nativeSv2.enabled ? (
-            <button type="button" className="operator-button" onClick={() => setMiningOpen(true)}>
+            <button type="button" className="connect-button" onClick={() => setMiningOpen(true)}>
               Connect miner
             </button>
           ) : null}
@@ -97,7 +98,7 @@ function MapApp() {
           >
             {theme === "dark" ? "○" : "●"}
           </button>
-          {summary.capabilities.operatorApiAvailable ? (
+          {!operatorAccessImplicit && summary.capabilities.operatorApiAvailable ? (
             <button
               type="button"
               className={adminKey ? "operator-button operator-unlocked" : "operator-button"}
@@ -115,6 +116,16 @@ function MapApp() {
         </div>
       ) : null}
 
+      {summary.mining?.nativeSv2.enabled ? (
+        <section className="miner-quick-connect" aria-label="Stratum V2 connection">
+          <div>
+            <span>Connect your miner</span>
+            <code>{nativeSv2Url(summary)}</code>
+          </div>
+          <button type="button" onClick={() => setMiningOpen(true)}>Connection details</button>
+        </section>
+      ) : null}
+
       <main className="map-shell">
         <SystemMap
           diagram={live.diagram}
@@ -123,7 +134,7 @@ function MapApp() {
           onHistoryWindowChange={live.setWindowKey}
           activeEvent={live.activeEvent}
           onEventComplete={live.acknowledgeEvent}
-          operatorUnlocked={Boolean(adminKey)}
+          operatorUnlocked={operatorAccessImplicit || Boolean(adminKey)}
         />
       </main>
 
@@ -224,6 +235,7 @@ function DetailsApp() {
 
   const summary = dashboard.summary;
   const testnet = summary.node.bitcoinNetwork !== "mainnet";
+  const operatorAccessImplicit = summary.capabilities.operatorAccessImplicit;
   const context: DashboardModuleContext = {
     summary,
     history: dashboard.history,
@@ -269,7 +281,7 @@ function DetailsApp() {
           >
             {theme === "dark" ? "○" : "●"}
           </button>
-          {summary.capabilities.operatorApiAvailable ? (
+          {!operatorAccessImplicit && summary.capabilities.operatorApiAvailable ? (
             <button
               type="button"
               className={adminKey ? "operator-button operator-unlocked" : "operator-button"}

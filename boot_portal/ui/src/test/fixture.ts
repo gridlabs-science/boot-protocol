@@ -97,6 +97,7 @@ export const summaryFixture: DashboardSummary = {
     webUiEnabled: true,
     legacyUiEnabled: true,
     operatorApiAvailable: true,
+    operatorAccessImplicit: false,
     addressLookupAvailable: true,
     workRateTelemetryAvailable: true,
     pulseTelemetryAvailable: true,

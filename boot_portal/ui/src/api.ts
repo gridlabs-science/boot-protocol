@@ -58,7 +58,7 @@ export const dashboardApi = {
     request<DashboardHistory>(`/api/dashboard/v1/history?window=${window}`),
   address: (address: string) =>
     request<DashboardAddress>(`/api/dashboard/v1/address/${encodeURIComponent(address)}`),
-  operator: (adminKey: string) =>
+  operator: (adminKey?: string) =>
     request<DashboardOperator>("/api/dashboard/v1/operator", adminKey),
   diagram: (adminKey?: string) =>
     adminKey

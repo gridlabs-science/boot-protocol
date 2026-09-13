@@ -31,6 +31,30 @@ public sealed class SetupModel(
 
     public string BitcoinNetwork => BitcoinScript.NormalizeNetwork(_poolConfig.BitcoinNetwork);
 
+    public bool NativeSv2Enabled => _poolConfig.NativeSv2Enabled;
+
+    public string NativeSv2Host
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_poolConfig.NativeSv2PublicHost))
+            {
+                return _poolConfig.NativeSv2PublicHost.Trim();
+            }
+
+            string requestHost = Request.Host.Host;
+            return string.IsNullOrWhiteSpace(requestHost) ||
+                   requestHost.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                   requestHost.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                ? "umbrel.local"
+                : requestHost;
+        }
+    }
+
+    public int NativeSv2Port => _poolConfig.NativeSv2PublicPort;
+
+    public string NativeSv2Url => $"stratum2+noise://{NativeSv2Host}:{NativeSv2Port}";
+
     public IActionResult OnGet()
     {
         if (_setupState.OperationalAtStartup)

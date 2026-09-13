@@ -101,6 +101,9 @@ public class PoolConfig
     [JsonPropertyName("public_operator_diagnostics_enabled")]
     public bool PublicOperatorDiagnosticsEnabled { get; set; } = false;
 
+    [JsonPropertyName("trusted_private_dashboard_enabled")]
+    public bool TrustedPrivateDashboardEnabled { get; set; } = false;
+
     [JsonPropertyName("max_state_bundle_history")]
     public int MaxStateBundleHistory { get; set; } = 8;
 

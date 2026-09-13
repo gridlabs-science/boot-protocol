@@ -37,6 +37,20 @@
                     <span>Locked payout address</span>
                     <code>@Model.SavedAddress</code>
                 </div>
+                @if (Model.NativeSv2Enabled)
+                {
+                    <section class="connection-summary" aria-labelledby="sv2-heading">
+                        <span class="connection-label">Next: connect a native Stratum V2 miner</span>
+                        <h2 id="sv2-heading">Your miner endpoint</h2>
+                        <code>@Model.NativeSv2Url</code>
+                        <dl>
+                            <div><dt>Host</dt><dd>@Model.NativeSv2Host</dd></div>
+                            <div><dt>Port</dt><dd>@Model.NativeSv2Port</dd></div>
+                            <div><dt>Username</dt><dd>Your payout address or worker label</dd></div>
+                        </dl>
+                        <p>If <code>@Model.NativeSv2Host</code> does not resolve from your miner, use this Umbrel device's LAN IP with port @Model.NativeSv2Port.</p>
+                    </section>
+                }
                 @if (Model.AutomaticRestart)
                 {
                     <p class="safety-note" id="restart-status">Waiting for the node to become ready. This page will open the dashboard automatically.</p>

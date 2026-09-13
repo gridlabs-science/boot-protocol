@@ -125,6 +125,7 @@ public sealed class DashboardReadModelService
                 OperatorApiAvailable =
                     _poolConfig.EnableAdminApi &&
                     !string.IsNullOrWhiteSpace(_poolConfig.AdminApiKey),
+                OperatorAccessImplicit = _poolConfig.TrustedPrivateDashboardEnabled,
                 WatchtowerAvailable = false
             }
         };
