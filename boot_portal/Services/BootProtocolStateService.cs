@@ -4463,10 +4463,7 @@ public class BootProtocolStateService
                 return false;
             }
 
-            foreach (BootPayoutSnapshotContext context in bundle.SnapshotContexts)
-            {
-                UpsertSnapshotContextNoLock(context);
-            }
+            UpsertSnapshotContextsNoLock(bundle.SnapshotContexts);
             _state.OnDeckProofs = mergedCanonicalProofs;
             RebuildOnDeckListNoLock();
             SetAcceptedParentBlockHashesNoLock(GetCanonicalParentBlockHashesForReserveNoLock(), _state.CurrentTipBlockHash);
@@ -4524,7 +4521,7 @@ public class BootProtocolStateService
         if (bundle.WinnersList.Count > _poolConfig.WinnersListSize ||
             bundle.ShareProofs.Count > _poolConfig.SnapshotProofSlotCount ||
             bundle.WorkSetProofs.Count > _poolConfig.WorkSetReserveLimit ||
-            bundle.SnapshotContexts.Count > GetMaxSnapshotContextCountNoLock() ||
+            bundle.SnapshotContexts.Count > GetMaxImportedSnapshotContextCount(_poolConfig) ||
             (bundle.SnapshotFamilyMember?.BoundaryReserveProofs.Count ?? 0) > _poolConfig.WorkSetReserveLimit)
         {
             return false;
@@ -4758,13 +4755,13 @@ public class BootProtocolStateService
             {
                 _state.ActiveSnapshotProofIds = validatedProofs.Select(proof => proof.ShareId).ToList();
             }
+            _state.OnDeckProofs = SortAndTrimProofs(
+                validatedWorkSetProofs.Count > 0 ? validatedWorkSetProofs : _state.OnDeckProofs,
+                _poolConfig.WorkSetReserveLimit);
             foreach (BootPayoutSnapshotContext context in bundle.SnapshotContexts)
             {
                 UpsertSnapshotContextNoLock(context);
             }
-            _state.OnDeckProofs = SortAndTrimProofs(
-                validatedWorkSetProofs.Count > 0 ? validatedWorkSetProofs : _state.OnDeckProofs,
-                _poolConfig.WorkSetReserveLimit);
             RebuildOnDeckListNoLock();
             foreach (var proof in validatedProofs)
             {
@@ -6295,6 +6292,23 @@ public class BootProtocolStateService
         PruneSnapshotContextsNoLock();
     }
 
+    private void UpsertSnapshotContextsNoLock(IEnumerable<BootPayoutSnapshotContext> contexts)
+    {
+        foreach (BootPayoutSnapshotContext context in contexts)
+        {
+            if (string.IsNullOrWhiteSpace(context.SnapshotId))
+            {
+                continue;
+            }
+
+            _state.SnapshotContexts.RemoveAll(existing =>
+                string.Equals(existing.SnapshotId, context.SnapshotId, StringComparison.OrdinalIgnoreCase));
+            _state.SnapshotContexts.Insert(0, CloneSnapshotContext(context));
+        }
+
+        PruneSnapshotContextsNoLock();
+    }
+
     private void PruneSnapshotContextsNoLock()
     {
         HashSet<string> protectedIds = new(StringComparer.OrdinalIgnoreCase);
@@ -6346,6 +6360,13 @@ public class BootProtocolStateService
     private int GetMaxSnapshotContextCountNoLock()
     {
         return Math.Max(_poolConfig.MaxStateBundleHistory, _poolConfig.WorkSetReserveMultiplier * 16);
+    }
+
+    internal static int GetMaxImportedSnapshotContextCount(PoolConfig config)
+    {
+        // A full reserve can legitimately contain proofs created against many payout snapshots.
+        // Bound imports by the proof capacity, not by the much smaller local history-retention cap.
+        return config.SnapshotProofSlotCount + config.WorkSetReserveLimit + 2;
     }
 
     private int RepairMissingWorkSetSnapshotContextsNoLock(DateTime nowUtc)

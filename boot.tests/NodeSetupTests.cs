@@ -101,7 +101,9 @@ public sealed class NodeSetupTests
     {
         Assert.IsTrue(NodeSetupPolicy.IsAllowedSetupPath("/setup"));
         Assert.IsTrue(NodeSetupPolicy.IsAllowedSetupPath("/setup.css"));
+        Assert.IsTrue(NodeSetupPolicy.IsAllowedSetupPath("/setup.js"));
         Assert.IsTrue(NodeSetupPolicy.IsAllowedSetupPath("/health/live"));
+        Assert.IsTrue(NodeSetupPolicy.IsAllowedSetupPath("/health/ready"));
         Assert.IsFalse(NodeSetupPolicy.IsAllowedSetupPath("/api/mining/share"));
         Assert.IsFalse(NodeSetupPolicy.IsAllowedSetupPath("/api/peer/session"));
         Assert.IsFalse(NodeSetupPolicy.IsAllowedSetupPath("/dashboardHub"));

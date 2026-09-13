@@ -1464,6 +1464,20 @@ public sealed class ShareAttributionTests
     }
 
     [TestMethod]
+    public void FullReserveImportAllowsOneSnapshotContextPerBoundedProof()
+    {
+        var config = new PoolConfig
+        {
+            WinnersListSize = 299,
+            WorkSetReserveMultiplier = 3,
+            MaxStateBundleHistory = 8
+        };
+
+        Assert.AreEqual(1198, BootProtocolStateService.GetMaxImportedSnapshotContextCount(config));
+        Assert.IsTrue(BootProtocolStateService.GetMaxImportedSnapshotContextCount(config) >= 396);
+    }
+
+    [TestMethod]
     public async Task RegtestSiblingImportAcceptsProofRecordedAgainstExplicitEmptyBootstrapSnapshotAsync()
     {
         using var bootstrap = TestHarness.Create(

@@ -23,6 +23,9 @@ public class PoolConfig
     [JsonPropertyName("pool_payout_script")]
     public string PoolPayoutScript { get; set; } = string.Empty;
 
+    [JsonPropertyName("restart_after_setup")]
+    public bool RestartAfterSetup { get; set; } = false;
+
     [JsonPropertyName("winners_list_size")]
     public int WinnersListSize { get; set; } = 299;
 
