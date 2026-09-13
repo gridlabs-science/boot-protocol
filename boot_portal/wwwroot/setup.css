@@ -187,6 +187,29 @@ button:hover { transform: translateY(-1px); }
 
 .address-summary code { overflow-wrap: anywhere; color: var(--good); }
 
+.connection-summary {
+    margin-top: 1rem;
+    border: 1px solid var(--line-strong);
+    padding: 1rem;
+    background: #0e0e0d;
+}
+
+.connection-label,
+.connection-summary dt {
+    color: var(--muted);
+    font: 500 0.68rem "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.connection-summary h2 { margin: 0.45rem 0 0.75rem; font-size: 1.25rem; }
+.connection-summary > code { display: block; overflow-wrap: anywhere; color: var(--good); font-size: 1rem; }
+.connection-summary dl { display: grid; gap: 0.45rem; margin: 1rem 0; }
+.connection-summary dl div { display: grid; grid-template-columns: 6rem 1fr; gap: 0.75rem; }
+.connection-summary dt, .connection-summary dd { margin: 0; }
+.connection-summary dd { overflow-wrap: anywhere; }
+.connection-summary p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+
 .safety-note { margin: 1.25rem 0 0; color: var(--muted); font-size: 0.85rem; line-height: 1.6; }
 
 @media (max-width: 640px) {

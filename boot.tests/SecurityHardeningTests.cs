@@ -36,6 +36,19 @@ public sealed class SecurityHardeningTests
     }
 
     [TestMethod]
+    public void PrivateDashboardDiagnosticsRequireExplicitApplianceOptInOrAdminAuth()
+    {
+        var config = ValidConfig();
+
+        Assert.IsFalse(config.TrustedPrivateDashboardEnabled);
+        Assert.IsFalse(DashboardController.CanViewOperatorDiagnostics(config, adminAuthorized: false));
+        Assert.IsTrue(DashboardController.CanViewOperatorDiagnostics(config, adminAuthorized: true));
+
+        config.TrustedPrivateDashboardEnabled = true;
+        Assert.IsTrue(DashboardController.CanViewOperatorDiagnostics(config, adminAuthorized: false));
+    }
+
+    [TestMethod]
     public void StoredMinerLabelIsBoundedAndMarkupFree()
     {
         string normalized = BootShareVerifier.NormalizeUsernameForStorage(

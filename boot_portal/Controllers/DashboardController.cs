@@ -12,15 +12,18 @@ public sealed class DashboardController : ControllerBase
     private readonly BootProtocolStateService _stateService;
     private readonly DashboardReadModelService _dashboard;
     private readonly DashboardVisualizationJournalService _visualization;
+    private readonly PoolConfig _poolConfig;
 
     public DashboardController(
         BootProtocolStateService stateService,
         DashboardReadModelService dashboard,
-        DashboardVisualizationJournalService visualization)
+        DashboardVisualizationJournalService visualization,
+        PoolConfig poolConfig)
     {
         _stateService = stateService;
         _dashboard = dashboard;
         _visualization = visualization;
+        _poolConfig = poolConfig;
     }
 
     [EnableRateLimiting("dashboard-read")]
@@ -56,7 +59,9 @@ public sealed class DashboardController : ControllerBase
     public IActionResult GetOperator()
     {
         string? apiKey = Request.Headers["X-Boot-Admin-Key"].FirstOrDefault();
-        if (!_stateService.IsAdminAuthorized(apiKey))
+        if (!CanViewOperatorDiagnostics(
+                _poolConfig,
+                _stateService.IsAdminAuthorized(apiKey)))
         {
             return Unauthorized(new { status = "rejected", reason = "Missing or invalid admin key" });
         }
@@ -70,7 +75,8 @@ public sealed class DashboardController : ControllerBase
     public IActionResult GetDiagram()
     {
         Response.Headers.CacheControl = "no-store";
-        return Ok(_dashboard.BuildDiagram(includeOperatorDetails: false));
+        return Ok(_dashboard.BuildDiagram(
+            includeOperatorDetails: _poolConfig.TrustedPrivateDashboardEnabled));
     }
 
     [EnableRateLimiting("dashboard-read")]
@@ -78,7 +84,10 @@ public sealed class DashboardController : ControllerBase
     public IActionResult GetDiagramEvents([FromQuery] long after = 0, [FromQuery] int limit = 256)
     {
         Response.Headers.CacheControl = "no-store";
-        return Ok(_visualization.Read(Math.Max(0, after), limit, redacted: true));
+        return Ok(_visualization.Read(
+            Math.Max(0, after),
+            limit,
+            redacted: !_poolConfig.TrustedPrivateDashboardEnabled));
     }
 
     [EnableRateLimiting("dashboard-read")]
@@ -88,7 +97,10 @@ public sealed class DashboardController : ControllerBase
         [FromQuery] int limit = 256)
     {
         Response.Headers.CacheControl = "no-store";
-        return Ok(_dashboard.BuildDiagramHistory(window, limit, includeOperatorDetails: false));
+        return Ok(_dashboard.BuildDiagramHistory(
+            window,
+            limit,
+            includeOperatorDetails: _poolConfig.TrustedPrivateDashboardEnabled));
     }
 
     [EnableRateLimiting("dashboard-read")]
@@ -158,6 +170,7 @@ public sealed class DashboardController : ControllerBase
             authentication = new
             {
                 operatorHeader = "X-Boot-Admin-Key",
+                trustedPrivateDashboard = _poolConfig.TrustedPrivateDashboardEnabled,
                 storageGuidance = "Keep operator credentials in memory only."
             }
         });
@@ -165,6 +178,11 @@ public sealed class DashboardController : ControllerBase
     private bool IsAdminAuthorized()
     {
         string? apiKey = Request.Headers["X-Boot-Admin-Key"].FirstOrDefault();
-        return _stateService.IsAdminAuthorized(apiKey);
+        return CanViewOperatorDiagnostics(
+            _poolConfig,
+            _stateService.IsAdminAuthorized(apiKey));
     }
+
+    internal static bool CanViewOperatorDiagnostics(PoolConfig config, bool adminAuthorized) =>
+        config.TrustedPrivateDashboardEnabled || adminAuthorized;
 }

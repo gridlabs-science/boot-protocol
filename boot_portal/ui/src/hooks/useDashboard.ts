@@ -23,10 +23,14 @@ export function useDashboard(windowKey: WindowKey, adminKey: string) {
 
   const refresh = useEffectEvent(async (includeHistory = false) => {
     try {
-      const [summary, history, operator] = await Promise.all([
-        dashboardApi.summary(windowKey),
+      const summary = await dashboardApi.summary(windowKey);
+      const [history, operator] = await Promise.all([
         includeHistory ? dashboardApi.history(windowKey) : Promise.resolve(state.history),
-        adminKey ? dashboardApi.operator(adminKey) : Promise.resolve(null)
+        summary.capabilities.operatorAccessImplicit
+          ? dashboardApi.operator()
+          : adminKey
+            ? dashboardApi.operator(adminKey)
+            : Promise.resolve(null)
       ]);
       setState((current) => ({
         ...current,

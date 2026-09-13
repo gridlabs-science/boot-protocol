@@ -6,9 +6,11 @@
 
     async function waitForReady() {
         try {
-            const response = await fetch("/health/ready", { cache: "no-store" });
-            const payload = await response.json();
-            if (response.ok && payload.status === "ready") {
+            const response = await fetch("/api/dashboard/v1/summary?window=24h", {
+                cache: "no-store",
+                headers: { Accept: "application/json" }
+            });
+            if (response.ok) {
                 window.location.replace("/");
                 return;
             }
@@ -17,7 +19,7 @@
         }
 
         if (Date.now() - startedAt > 120000) {
-            status.textContent = "GridPool is taking longer than expected to restart. Restart the app from Umbrel, then reopen it.";
+            status.textContent = "GridPool is taking longer than expected to restart. You may leave this page open or restart the app from Umbrel.";
             return;
         }
         window.setTimeout(waitForReady, 1000);

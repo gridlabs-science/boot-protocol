@@ -68,8 +68,11 @@ exports.
 Miner-facing endpoints are explicit non-secret summary data. Packaged nodes set
 `native_sv2_enabled`, `native_sv2_public_host`, and `native_sv2_public_port`;
 when the host is blank the dashboard suggests the browser hostname and explains
-that a reachable LAN hostname or IP may be substituted. Never infer that the
-operator API exists merely because the UI is private behind an appliance proxy.
+that a reachable LAN hostname or IP may be substituted. Appliance wrappers may
+explicitly set `trusted_private_dashboard_enabled` when their authenticated
+proxy is the access boundary. That flag unlocks read-only diagnostics only;
+destructive admin routes still require the admin key. It defaults to false and
+must never be inferred merely because a UI appears private.
 
 The production map owns one SignalR connection per tab. Invalidation refreshes
 are coalesced and single-flight: journal reads run at most once per second,

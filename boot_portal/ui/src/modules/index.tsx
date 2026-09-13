@@ -392,7 +392,7 @@ function ConsoleModule(context: DashboardModuleContext) {
           result = context.operator.localMiningSources;
           break;
         case "latency":
-          if (!context.adminKey) throw new Error("Unlock operator view before requesting relay diagnostics.");
+          if (!context.operator) throw new Error("Operator diagnostics are not available on this node.");
           result = await dashboardApi.raw("/api/network/peer-relay-latency?window=12h&limit=100", context.adminKey);
           break;
         case "connect":
