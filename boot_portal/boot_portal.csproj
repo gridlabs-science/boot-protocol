@@ -12,7 +12,7 @@
     <PackageReference Include="NetMQ" Version="4.0.2.2" />
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.18" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.21" />
   </ItemGroup>
 
   <ItemGroup>
